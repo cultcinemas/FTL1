@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  worker:
+    container_name: f2lnk
+    build: .
+    command: python3 -m f2lnk
+    restart: on-failure
+    ports:
+      - "8080:8080"
