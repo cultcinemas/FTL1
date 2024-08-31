@@ -25,7 +25,7 @@ class Var(object):
     BIND_ADRESS = str(getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0'))
     PING_INTERVAL = int(environ.get("PING_INTERVAL", "1200"))  # 20 minutes
     OWNER_ID = [int(x) for x in os.environ.get("OWNER_ID", "1392184089").split()]
-    URL = getenv('URL', 'http://91.239.208.36:8080') min
+    URL = getenv('URL', 'http://185.55.240.55:8080') min
     if not URL.endswith('/'):
         URL = f'{URL}/'
     PORT = getenv('PORT', 8000)
