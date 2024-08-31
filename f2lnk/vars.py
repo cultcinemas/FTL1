@@ -28,7 +28,7 @@ class Var(object):
     URL = getenv('URL', 'http://185.55.240.55:8080')
     if not URL.endswith('/'):
         URL = f'{URL}/'
-    PORT = getenv('PORT', 8000)
+    PORT = getenv('PORT', 8080)
     OWNER_USERNAME = str(getenv('OWNER_USERNAME', 'Tyson3290'))
     DATABASE_URL = str(getenv('DATABASE_URL', 'mongodb+srv://NewMoviesRoBot:NewMoviesRoBot3290@cluster0.73vkexn.mongodb.net/?retryWrites=true&w=majority'))
     UPDATES_CHANNEL = str(getenv('UPDATES_CHANNEL', '@CultCinemas'))
