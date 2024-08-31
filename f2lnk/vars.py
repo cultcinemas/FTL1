@@ -28,7 +28,7 @@ class Var(object):
         URL = f'{URL}/'
     PORT = getenv('PORT', 8080)
     OWNER_USERNAME = str(getenv('OWNER_USERNAME', 'Tyson3290'))
-    DATABASE_URL = str(getenv('DATABASE_URL', 'DATABASE_URL", "mongodb+srv://pinkybitlu:pinky7268@cluster0.dizew5m.mongodb.net/?retryWrites=true&w=majority"))
+    DATABASE_URL = str(getenv('DATABASE_URL', "mongodb+srv://pinkybitlu:pinky7268@cluster0.dizew5m.mongodb.net/?retryWrites=true&w=majority"))
     UPDATES_CHANNEL = str(getenv('UPDATES_CHANNEL', '@CultCinemas'))
     BANNED_CHANNELS = list(set(int(x) for x in str(getenv("BANNED_CHANNELS", "")).split()))
     BAN_CHNL = list(set(int(x) for x in str(getenv("BAN_CHNL", "")).split()))
