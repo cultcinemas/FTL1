@@ -4,7 +4,7 @@ services:
   worker:
     container_name: FTL
     build: .
-    command: python3 -m f2lnk
+    command: bash start.sh
     restart: on-failure
     ports:
       - "3030:8080"
