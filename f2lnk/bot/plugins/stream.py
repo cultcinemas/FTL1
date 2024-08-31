@@ -32,7 +32,7 @@ msg_text ="""<b>‣ ʏᴏᴜʀ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ! 😎
 @StreamBot.on_message((filters.private) & (filters.document | filters.video | filters.audio | filters.photo) , group=4)
 async def private_receive_handler(c: Client, m: Message):
     if Var.AUTH_USERS and m.from_user.id not in Var.AUTH_USERS:
-        await m.reply_text(text="This is a private bot!", True)
+        await m.reply_text("This is a private bot!", True)
         return
     if not await db.is_user_exist(m.from_user.id):
         await db.add_user(m.from_user.id)
@@ -98,7 +98,7 @@ async def private_receive_handler(c: Client, m: Message):
 @StreamBot.on_message(filters.channel & ~filters.group & (filters.document | filters.video | filters.photo)  & ~filters.forwarded, group=-1)
 async def channel_receive_handler(bot, broadcast):
     if Var.AUTH_USERS and broadcast.chat.id not in Var.AUTH_USERS:
-        await broadcast.reply_text(text="This is a private bot!", True)
+        await broadcast.reply_text("This is a private bot!", True)
         return
     if int(broadcast.chat.id) in Var.BAN_CHNL:
         print("chat trying to get straming link is found in BAN_CHNL,so im not going to give stram link")
