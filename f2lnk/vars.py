@@ -8,7 +8,7 @@ bisal_channel = "https://telegram.me/bisal_files"
 bisal_grp = "https://t.me/+PA8OPL2Zglk3MDM1"
 
 class Var(object):
-    AUTH_USERS = '' # Add id of users you want to authorize to use the bot. Separated by spaces
+    AUTH_USERS = '7386512270:AAF_szBwnRs5neTpBAWQAOz91cKigxYh9HE' # Add id of users you want to authorize to use the bot. Separated by spaces
     AUTH_USERS = AUTH_USERS.split()
     MULTI_CLIENT = False
     API_ID = int(getenv('API_ID', '28737888'))
