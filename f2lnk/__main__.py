@@ -58,15 +58,10 @@ async def start_services():
             spec.loader.exec_module(load)
             sys.modules["biisal.bot.plugins." + plugin_name] = load
             print("Imported => " + plugin_name)
-    if Var.ON_HEROKU:
-        print("------------------ Starting Keep Alive Service ------------------")
-        print()
-        asyncio.create_task(ping_server())
     print('-------------------- Initalizing Web Server -------------------------')
     app = web.AppRunner(await web_server())
     await app.setup()
-    bind_address = "0.0.0.0" if Var.ON_HEROKU else Var.BIND_ADRESS
-    await web.TCPSite(app, bind_address, Var.PORT).start()
+    await web.TCPSite(app, "0.0.0.0", Var.PORT).start()
     print('----------------------------- DONE ---------------------------------------------------------------------')
     print('\n')
     print('---------------------------------------------------------------------------------------------------------')
