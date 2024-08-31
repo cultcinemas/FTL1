@@ -9,10 +9,10 @@ bisal_grp = "https://t.me/+PA8OPL2Zglk3MDM1"
 
 class Var(object):
     AUTH_USERS = '5685802336 5452354891 5602172369 1392184089' # Add id of users you want to authorize to use the bot. Separated by spaces
-    MULTI_CLIENT = False
+    MULTI_CLIENT = True
     API_ID = int(getenv('API_ID', '28737888'))
     API_HASH = str(getenv('API_HASH', 'aa9fc525a5e5a837256c1f0b445af447'))
-    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7386512270:AAF_szBwnRs5neTpBAWQAOz91cKigxYh9HE'))
+    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7531918516:AAEaYIXq6whO97PfRCsGZldTwtWgjeHqX0A'))
     name = str(getenv('name', 'bisal_file2link_bot'))
     SLEEP_THRESHOLD = int(getenv('SLEEP_THRESHOLD', '60'))
     WORKERS = int(getenv('WORKERS', '4'))
