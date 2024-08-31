@@ -2,20 +2,18 @@ import os
 from os import getenv, environ
 from dotenv import load_dotenv
 
-
-
 load_dotenv()
 bot_name = "Bɪɪsᴀʟ Fɪʟᴇ2Lɪɴᴋ Bᴏᴛ"
 bisal_channel = "https://telegram.me/bisal_files"
 bisal_grp = "https://t.me/+PA8OPL2Zglk3MDM1"
 
 class Var(object):
-    AUTH_USERS = '5602172369 5452354891 1392184089' # Add id of users you want to authorize to use the bot. Separated by spaces
+    AUTH_USERS = '' # Add id of users you want to authorize to use the bot. Separated by spaces
     AUTH_USERS = AUTH_USERS.split()
     MULTI_CLIENT = False
     API_ID = int(getenv('API_ID', '28737888'))
     API_HASH = str(getenv('API_HASH', 'aa9fc525a5e5a837256c1f0b445af447'))
-    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7386512270:AAFEDOjxh6OP0Vl5oeK8Wi5i8JMd97bmsEk'))
+    BOT_TOKEN = str(getenv('BOT_TOKEN' , '6975980093:AAF95hTPJZ5asfYzFqyzso3u4NUsQ_8v9j8'))
     name = str(getenv('name', 'bisal_file2link_bot'))
     SLEEP_THRESHOLD = int(getenv('SLEEP_THRESHOLD', '60'))
     WORKERS = int(getenv('WORKERS', '4'))
@@ -24,7 +22,7 @@ class Var(object):
     PORT = int(getenv('PORT', '8080'))
     BIND_ADRESS = str(getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0'))
     PING_INTERVAL = int(environ.get("PING_INTERVAL", "1200"))  # 20 minutes
-    OWNER_ID = [int(x) for x in os.environ.get("OWNER_ID", "1392184089").split()]
+    OWNER_ID = [int(x) for x in os.environ.get("OWNER_ID", "6101337858").split()]
     URL = getenv('URL', 'http://185.55.240.55:8080')
     if not URL.endswith('/'):
         URL = f'{URL}/'
