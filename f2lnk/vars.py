@@ -8,11 +8,11 @@ bisal_channel = "https://telegram.me/bisal_files"
 bisal_grp = "https://t.me/+PA8OPL2Zglk3MDM1"
 
 class Var(object):
-    AUTH_USERS = '5685802336 5452354891 5602172369 1392184089 5847742709' # Add id of users you want to authorize to use the bot. Separated by spaces
+    AUTH_USERS = '5685802336 5452354891 5602172369 1392184089 5847742709 6196298040' # Add id of users you want to authorize to use the bot. Separated by spaces
     MULTI_CLIENT = True
     API_ID = int(getenv('API_ID', '28737888'))
     API_HASH = str(getenv('API_HASH', 'aa9fc525a5e5a837256c1f0b445af447'))
-    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7531918516:AAEaYIXq6whO97PfRCsGZldTwtWgjeHqX0A'))
+    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7476704065:AAEUBhA8zwWQzOBd9Y8QwzNk-8hJHDbA6Rc'))
     name = str(getenv('name', 'bisal_file2link_bot'))
     SLEEP_THRESHOLD = int(getenv('SLEEP_THRESHOLD', '60'))
     WORKERS = int(getenv('WORKERS', '4'))
