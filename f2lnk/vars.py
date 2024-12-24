@@ -12,12 +12,12 @@ class Var(object):
     MULTI_CLIENT = True
     API_ID = int(getenv('API_ID', '28737888'))
     API_HASH = str(getenv('API_HASH', 'aa9fc525a5e5a837256c1f0b445af447'))
-    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7476704065:AAEUBhA8zwWQzOBd9Y8QwzNk-8hJHDbA6Rc'))
+    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7476704065:AAEUBhA8zwWQzOBd9Y8QwzNk-8hJHDbA6Rc 7798605358:AAELu5j96rmUo4kT5boPwPN-zEgo9aR6n7U 7938221384:AAH64DagNcuuQ65OU4VPvn13dZ-SvTeex8o'))
     name = str(getenv('name', 'bisal_file2link_bot'))
     SLEEP_THRESHOLD = int(getenv('SLEEP_THRESHOLD', '60'))
     WORKERS = int(getenv('WORKERS', '4'))
-    BIN_CHANNEL = int(getenv('BIN_CHANNEL', '-1002417842504'))
-    NEW_USER_LOG = int(getenv('NEW_USER_LOG', '-1002417842504'))
+    BIN_CHANNEL = int(getenv('BIN_CHANNEL', '-1002101797163'))
+    NEW_USER_LOG = int(getenv('NEW_USER_LOG', '-1002101797163'))
     PORT = int(getenv('PORT', '8080'))
     BIND_ADRESS = str(getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0'))
     PING_INTERVAL = int(environ.get("PING_INTERVAL", "1200"))  # 20 minutes
