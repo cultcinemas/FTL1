@@ -1,15 +1,16 @@
 import asyncio
 import logging
-from ..vars import Var
+
 from pyrogram import Client
-from f2lnk.utils.config_parser import TokenParser
+
 from . import multi_clients, work_loads, StreamBot
+from ..vars import Var
 
 
 async def initialize_clients():
     multi_clients[0] = StreamBot
     work_loads[0] = 0
-    all_tokens = TokenParser().parse_from_env()
+    all_tokens = Var.MULTI_TOKENS.split()
     if not all_tokens:
         print("No additional clients found, using default client")
         return
@@ -30,12 +31,12 @@ async def initialize_clients():
                 in_memory=True
             ).start()
             work_loads[client_id] = 0
-            return client_id, client
+            multi_clients[client_id] = client
         except Exception:
             logging.error(f"Failed starting Client - {client_id} Error:", exc_info=True)
 
-    clients = await asyncio.gather(*[start_client(i, token) for i, token in all_tokens.items()])
-    multi_clients.update(dict(clients))
+    await asyncio.gather(*[start_client(i, token.strip()) for i, token in enumerate(all_tokens, 1)])
+
     if len(multi_clients) != 1:
         Var.MULTI_CLIENT = True
         print("Multi-Client Mode Enabled")

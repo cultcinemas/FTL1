@@ -10,7 +10,7 @@ from .vars import Var
 from aiohttp import web
 from .server import web_server
 from .utils.keepalive import ping_server
-from f2lnk.bot.clients import initialize_clients
+from f2lnk.bot.multi_clients import initialize_clients
 
 LOGO = """
  ____ ___ ___ ____    _    _
