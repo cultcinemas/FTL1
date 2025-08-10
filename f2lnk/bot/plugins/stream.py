@@ -38,7 +38,6 @@ def is_maintenance_mode():
 
 @StreamBot.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) , group=4)
 async def private_receive_handler(c: Client, m: Message):
-    # --- NEW --- Feature 3: Maintenance Mode Check
     if is_maintenance_mode() and m.from_user.id not in Var.OWNER_ID:
         await m.reply_text("The bot is currently under maintenance. Please try again later.", quote=True)
         return
@@ -72,11 +71,18 @@ async def private_receive_handler(c: Client, m: Message):
     if ban_chk:
         return await m.reply(Var.BAN_ALERT)
     
-    # --- NEW --- Feature 2: Daily Usage Limit Check
+    # --- UPDATED --- Feature 1 & 2: Tiered Daily Usage Limit Check
     if m.from_user.id not in Var.OWNER_ID:
+        # Check for expired plan and revert if necessary
+        if await db.check_and_update_tier(m.from_user.id):
+            await m.reply_text("Your premium plan has expired. You have been reverted to the default plan.")
+
         user_data = await db.get_user_info(m.from_user.id)
         file_size = get_media_file_size(m)
-        limit_in_bytes = Var.DAILY_LIMIT_GB * 1024 * 1024 * 1024
+        
+        user_tier = user_data.get('tier', Var.DEFAULT_PLAN)
+        daily_limit_gb = Var.USER_PLANS.get(user_tier, Var.DAILY_LIMIT_GB)
+        limit_in_bytes = daily_limit_gb * 1024 * 1024 * 1024
 
         today = datetime.date.today().isoformat()
         if user_data.get("last_reset_date") != today:
@@ -84,9 +90,9 @@ async def private_receive_handler(c: Client, m: Message):
             user_data['daily_data_used'] = 0 # Reset for current check
         
         if user_data.get("daily_data_used", 0) + file_size > limit_in_bytes:
-            await m.reply_text(f"You have reached your daily limit of **{Var.DAILY_LIMIT_GB} GB**.\n"
+            await m.reply_text(f"You have reached your daily limit of **{daily_limit_gb} GB** for the `{user_tier.upper()}` plan.\n"
                                f"Your usage today: **{humanbytes(user_data.get('daily_data_used', 0))}**.\n"
-                               "Please try again tomorrow.", quote=True)
+                               "Please try again tomorrow or upgrade your plan.", quote=True)
             return
 
     try:
@@ -120,7 +126,6 @@ async def private_receive_handler(c: Client, m: Message):
 
 @StreamBot.on_message(filters.channel & (filters.document | filters.video | filters.photo) & ~filters.forwarded, group=-1)
 async def channel_receive_handler(bot, broadcast):
-    # --- NEW --- Feature 3: Maintenance Mode Check
     if is_maintenance_mode():
         return
         
@@ -138,7 +143,6 @@ async def channel_receive_handler(bot, broadcast):
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         await bot.edit_message_reply_markup(chat_id=broadcast.chat.id, message_id=broadcast.id, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
         
-        # --- NEW --- Feature 1: Link Logging
         log_text = (
             f"**Link Generated (Channel)**\n\n"
             f"**Channel:** {broadcast.chat.title}\n"
@@ -154,24 +158,28 @@ async def channel_receive_handler(bot, broadcast):
 
 @StreamBot.on_message(filters.group & (filters.document | filters.video | filters.audio | filters.photo) & ~filters.forwarded, group=5)
 async def group_receive_handler(bot: Client, m: Message):
-    # --- NEW --- Feature 3: Maintenance Mode Check
     if is_maintenance_mode() and m.from_user and m.from_user.id not in Var.OWNER_ID:
-        # Don't send message in group to avoid spam, just return.
         return
 
     is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
     if is_bot_locked and not await db.is_user_authorized(m.chat.id):
         return
 
-    # --- NEW --- Feature 2: Daily Usage Limit Check
+    # --- UPDATED --- Feature 1 & 2: Tiered Daily Usage Limit Check
     if m.from_user and m.from_user.id not in Var.OWNER_ID:
         if not await db.is_user_exist(m.from_user.id):
             await db.add_user(m.from_user.id)
             await bot.send_message(Var.BIN_CHANNEL, f"New User Joined! : \n\n Name : [{m.from_user.first_name}](tg://user?id={m.from_user.id}) Started Your Bot!!")
         
+        # Check for expired plan and revert if necessary
+        await db.check_and_update_tier(m.from_user.id)
+
         user_data = await db.get_user_info(m.from_user.id)
         file_size_for_limit = get_media_file_size(m)
-        limit_in_bytes = Var.DAILY_LIMIT_GB * 1024 * 1024 * 1024
+        
+        user_tier = user_data.get('tier', Var.DEFAULT_PLAN)
+        daily_limit_gb = Var.USER_PLANS.get(user_tier, Var.DAILY_LIMIT_GB)
+        limit_in_bytes = daily_limit_gb * 1024 * 1024 * 1024
 
         today = datetime.date.today().isoformat()
         if user_data.get("last_reset_date") != today:
@@ -179,7 +187,6 @@ async def group_receive_handler(bot: Client, m: Message):
             user_data['daily_data_used'] = 0 # Reset for current check
         
         if user_data.get("daily_data_used", 0) + file_size_for_limit > limit_in_bytes:
-            # Don't send message in group to avoid spam, just return.
             return
 
     try:
@@ -198,7 +205,6 @@ async def group_receive_handler(bot: Client, m: Message):
         
         await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
 
-        # --- NEW --- Feature 1: Link Logging
         if m.from_user:
             log_text = (
                 f"**Link Generated (Group)**\n\n"
