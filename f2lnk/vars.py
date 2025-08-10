@@ -35,7 +35,7 @@ class Var(object):
     BAN_CHNL = list(set(int(x) for x in str(getenv("BAN_CHNL", "")).split()))
     BAN_ALERT = str(getenv('BAN_ALERT' , '<b>ʏᴏᴜʀ ᴀʀᴇ ʙᴀɴɴᴇᴅ ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ.Pʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ @biisal_bot ᴛᴏ ʀᴇsᴏʟᴠᴇ ᴛʜᴇ ɪssᴜᴇ!!</b>'))
     # --- NEW --- Feature 2: Daily Usage Limit in GB
-    DAILY_LIMIT_GB = int(getenv('DAILY_LIMIT_GB', '5'))
+    DAILY_LIMIT_GB = int(getenv('DAILY_LIMIT_GB', '10'))
     # --- NEW --- Feature 1: User Tiers
     USER_PLANS = {
         "plan1": 20,
