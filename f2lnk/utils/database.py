@@ -1,5 +1,6 @@
 import datetime
 import motor.motor_asyncio
+from f2lnk.vars import Var
 
 class Database:
     def __init__(self, uri, database_name):
@@ -17,9 +18,11 @@ class Database:
             last_active_date=today,
             files_processed=0,
             total_data_used=0,
-            # --- NEW --- Feature 2: Daily Usage Limit
             daily_data_used=0,
-            last_reset_date=today
+            last_reset_date=today,
+            # --- NEW --- Feature 1: User Tiers
+            tier=Var.DEFAULT_PLAN,
+            plan_expiry_date=None
         )
 
     async def add_user(self, id):
@@ -34,7 +37,6 @@ class Database:
         """Retrieves a user's statistics from the database."""
         return await self.col.find_one({'id': int(id)})
 
-    # --- UPDATED --- Feature 2: Daily Usage Limit
     async def update_user_stats(self, id, file_size):
         """Increments file count and data usage for a user."""
         today = datetime.date.today().isoformat()
@@ -50,7 +52,6 @@ class Database:
             }
         )
     
-    # --- NEW --- Feature 2: Daily Usage Limit
     async def reset_daily_usage(self, id):
         """Resets the daily usage for a user."""
         today = datetime.date.today().isoformat()
@@ -60,6 +61,41 @@ class Database:
                 '$set': {'daily_data_used': 0, 'last_reset_date': today}
             }
         )
+
+    # --- NEW --- Feature 1: User Tiers
+    async def set_user_tier(self, id, tier, expiry_date):
+        """Sets a user's tier and expiry date."""
+        await self.col.update_one(
+            {'id': int(id)},
+            {
+                '$set': {
+                    'tier': tier,
+                    'plan_expiry_date': expiry_date.isoformat() if expiry_date else None
+                }
+            }
+        )
+
+    # --- NEW --- Feature 1: User Tiers
+    async def check_and_update_tier(self, id):
+        """Checks if a user's plan has expired and reverts them to default."""
+        user = await self.get_user_info(id)
+        if not user or not user.get('plan_expiry_date'):
+            return
+        
+        expiry_date = datetime.datetime.fromisoformat(user['plan_expiry_date']).date()
+        
+        if datetime.date.today() > expiry_date:
+            await self.col.update_one(
+                {'id': int(id)},
+                {
+                    '$set': {
+                        'tier': Var.DEFAULT_PLAN,
+                        'plan_expiry_date': None
+                    }
+                }
+            )
+            return True # Indicates the plan has expired
+        return False # Plan is still active
 
     async def total_users_count(self):
         count = await self.col.count_documents({})
