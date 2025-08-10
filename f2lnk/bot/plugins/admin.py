@@ -8,12 +8,15 @@ import time
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from urllib.parse import quote_plus
+from pyrogram.errors import FloodWait
+from io import BytesIO
 
 from f2lnk.bot import StreamBot, last_file_for_test
 from f2lnk.utils.broadcast_helper import send_msg
 from f2lnk.utils.database import Database
 from f2lnk.utils.human_readable import humanbytes
 from f2lnk.vars import Var
+from f2lnk.utils.file_properties import get_name, get_hash, get_media_from_message
 
 db = Database(Var.DATABASE_URL, Var.name)
 Broadcast_IDs = {}
@@ -225,3 +228,102 @@ async def speed_test(c: Client, m: Message):
         f"**Speed:** **{speed_mbps:.2f} Mbps**"
     )
     await msg.edit(result_text)
+
+# --- NEW AND IMPROVED /batch COMMAND ---
+@StreamBot.on_message(filters.command("batch") & filters.private & filters.user(Var.OWNER_ID))
+async def batch_link_generator(c: Client, m: Message):
+    try:
+        # Command usage: /batch <channel_id> <start_msg_id> <end_msg_id>
+        channel_id = m.command[1]
+        start_id = int(m.command[2])
+        end_id = int(m.command[3])
+        
+        if not (channel_id.startswith("-") or channel_id.startswith("@")):
+             channel_id = int(channel_id)
+        
+        if start_id > end_id:
+            await m.reply_text("Start message ID must be less than or equal to the end message ID.")
+            return
+    except (IndexError, ValueError):
+        await m.reply_text(
+            "<b>Usage:</b> /batch <channel_id_or_username> <start_msg_id> <end_msg_id>\n\n"
+            "Scrapes files from a specified channel and generates links. "
+            "Make sure the bot is an admin in the target channel."
+        )
+        return
+
+    status_msg = await m.reply_text(f"Batch processing initiated for channel `{channel_id}` from message ID `{start_id}` to `{end_id}`.\n\nPlease wait...")
+    
+    generated_links = []
+    total_messages = (end_id - start_id) + 1
+    processed_count = 0
+    success_count = 0
+    error_count = 0
+
+    try:
+        await c.get_chat(channel_id)
+    except Exception as e:
+        await status_msg.edit_text(f"An error occurred while accessing the channel `{channel_id}`.\n\n**Error:** `{e}`\n\nPlease ensure the bot is an admin in the channel and the ID/username is correct.")
+        return
+
+    # Loop through the message IDs
+    for msg_id in range(start_id, end_id + 1):
+        processed_count += 1
+        
+        # Update status periodically
+        if processed_count % 20 == 0 or processed_count == total_messages:
+            try:
+                await status_msg.edit_text(f"**Progress for `{channel_id}`:**\n\n- Processed: `{processed_count}/{total_messages}`\n- Generated: `{success_count}` links\n- Errors: `{error_count}`")
+            except FloodWait as f:
+                await asyncio.sleep(f.x)
+
+        try:
+            # Get the message from the target channel
+            message = await c.get_messages(channel_id, msg_id)
+
+            if get_media_from_message(message):
+                # Forward the file to BIN_CHANNEL to make it streamable
+                log_msg = await message.forward(Var.BIN_CHANNEL)
+                
+                file_name = get_name(log_msg)
+                file_hash = get_hash(log_msg)
+
+                if not file_name:
+                    file_name = f"File_{log_msg.id}"
+                
+                # Generate the link using the new message ID from BIN_CHANNEL
+                stream_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+                generated_links.append(stream_link)
+                success_count += 1
+                await asyncio.sleep(1) # Small delay to avoid hitting rate limits
+
+        except FloodWait as e:
+            print(f"Sleeping for {e.x}s due to FloodWait.")
+            await asyncio.sleep(e.x)
+            processed_count -=1 # Decrement to re-process this message
+            continue
+
+        except Exception as e:
+            error_count += 1
+            print(f"Error processing message {msg_id} from {channel_id}: {e}")
+            continue
+
+    # Final status update
+    await status_msg.edit_text(f"**Batch Processing Complete for `{channel_id}`!**\n\n- Total Messages Scanned: `{processed_count}`\n- Links Generated: `{success_count}`\n- Errors Encountered: `{error_count}`")
+
+    # Send the generated links
+    if generated_links:
+        # Join links with a double newline for a visible gap
+        links_text = "\n\n".join(generated_links) 
+        
+        if len(links_text) > 4096:
+            with BytesIO(links_text.encode('utf-8')) as file:
+                file.name = f"batch_links_{channel_id}_{start_id}_to_{end_id}.txt"
+                await m.reply_document(
+                    document=file,
+                    caption="All generated links are in the file above."
+                )
+        else:
+            await m.reply_text(links_text)
+    else:
+        await m.reply_text("No files were found in the specified message range in that channel.")
