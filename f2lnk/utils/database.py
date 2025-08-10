@@ -16,7 +16,10 @@ class Database:
             join_date=today,
             last_active_date=today,
             files_processed=0,
-            total_data_used=0
+            total_data_used=0,
+            # --- NEW --- Feature 2: Daily Usage Limit
+            daily_data_used=0,
+            last_reset_date=today
         )
 
     async def add_user(self, id):
@@ -31,14 +34,30 @@ class Database:
         """Retrieves a user's statistics from the database."""
         return await self.col.find_one({'id': int(id)})
 
+    # --- UPDATED --- Feature 2: Daily Usage Limit
     async def update_user_stats(self, id, file_size):
         """Increments file count and data usage for a user."""
         today = datetime.date.today().isoformat()
         await self.col.update_one(
             {'id': int(id)},
             {
-                '$inc': {'files_processed': 1, 'total_data_used': file_size},
+                '$inc': {
+                    'files_processed': 1,
+                    'total_data_used': file_size,
+                    'daily_data_used': file_size
+                },
                 '$set': {'last_active_date': today}
+            }
+        )
+    
+    # --- NEW --- Feature 2: Daily Usage Limit
+    async def reset_daily_usage(self, id):
+        """Resets the daily usage for a user."""
+        today = datetime.date.today().isoformat()
+        await self.col.update_one(
+            {'id': int(id)},
+            {
+                '$set': {'daily_data_used': 0, 'last_reset_date': today}
             }
         )
 
