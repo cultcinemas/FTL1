@@ -123,7 +123,10 @@ async def media_streamer(request: web.Request, id: int, secure_hash: str):
             headers={"Content-Range": f"bytes */{file_size}"},
         )
 
+    # --- FIX ---
+    # Reverted chunk size back to its original stable value of 1MB.
     chunk_size = 1024 * 1024
+    
     until_bytes = min(until_bytes, file_size - 1)
 
     offset = from_bytes - (from_bytes % chunk_size)
