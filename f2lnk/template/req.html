@@ -57,7 +57,7 @@
                     <p id="myDiv">{{file_name}}</p>
                 </div>
                 <div class="downloadBtn">
-                    <button class="magnet" onclick="vlc_player()"><img src="https://i.postimg.cc/15TQ4y7B/vlc.png"
+                    <button class="magnet" onclick="window.location.href = 'intent:{{file_url}}#Intent;package=org.videolan.vlc;action=android.intent.action.VIEW;end;'"><img src="https://i.postimg.cc/15TQ4y7B/vlc.png"
                             alt="">watch in VLC PLAYER</button>
                     <button class="magnet" onclick="mx_player()"><img src="https://i.postimg.cc/sx4Msv4T/mx.png"
                             alt="">watch in MX PLAYER</button>
