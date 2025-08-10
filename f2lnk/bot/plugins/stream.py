@@ -6,18 +6,13 @@ from pyrogram.errors import FloodWait, UserNotParticipant
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from urllib.parse import quote_plus
 
-from f2lnk.bot import StreamBot
+from f2lnk.bot import StreamBot, last_file_for_test
 from f2lnk.utils.database import Database
 from f2lnk.utils.human_readable import humanbytes
 from f2lnk.vars import Var
-
 from f2lnk.utils.file_properties import get_name, get_hash, get_media_file_size
+
 db = Database(Var.DATABASE_URL, Var.name)
-
-
-MY_PASS = os.environ.get("MY_PASS", None)
-pass_dict = {}
-pass_db = Database(Var.DATABASE_URL, "ag_passwords")
 
 msg_text ="""<b>‣ ʏᴏᴜʀ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ! 😎
 
@@ -29,110 +24,98 @@ msg_text ="""<b>‣ ʏᴏᴜʀ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ! 😎
 
 ‣ ɢᴇᴛ <a href="https://t.me/+PA8OPL2Zglk3MDM1">ᴍᴏʀᴇ ғɪʟᴇs</a></b> 🤡"""
 
+def save_last_file_details(message_id, file_name, file_hash):
+    """Helper function to update the last file info."""
+    last_file_for_test['id'] = message_id
+    last_file_for_test['name'] = file_name
+    last_file_for_test['hash'] = file_hash
 
-
-@StreamBot.on_message((filters.private) & (filters.document | filters.video | filters.audio | filters.photo) , group=4)
+@StreamBot.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) , group=4)
 async def private_receive_handler(c: Client, m: Message):
-    if Var.AUTH_USERS and str(m.from_user.id) not in Var.AUTH_USERS:
-        await m.reply_text("This is a private bot!", True)
-        return
+    if m.from_user.id not in Var.OWNER_ID:
+        is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
+        if is_bot_locked:
+            is_in_env_auth = Var.AUTH_USERS and str(m.from_user.id) in Var.AUTH_USERS.split()
+            is_in_db_auth = await db.is_user_authorized(m.from_user.id)
+            if not is_in_env_auth and not is_in_db_auth:
+                await m.reply_text("You are not authorized to use this bot.", True)
+                return
+
     if not await db.is_user_exist(m.from_user.id):
         await db.add_user(m.from_user.id)
-        await c.send_message(
-            Var.BIN_CHANNEL,
-            f"New User Joined! : \n\n Name : [{m.from_user.first_name}](tg://user?id={m.from_user.id}) Started Your Bot!!"
-        )
+        await c.send_message(Var.BIN_CHANNEL, f"New User Joined! : \n\n Name : [{m.from_user.first_name}](tg://user?id={m.from_user.id}) Started Your Bot!!")
+    
     if Var.UPDATES_CHANNEL != "None":
         try:
             user = await c.get_chat_member(Var.UPDATES_CHANNEL, m.chat.id)
             if user.status == "kicked":
-                await c.send_message(
-                    chat_id=m.chat.id,
-                    text="You are banned!\n\n  **Cᴏɴᴛᴀᴄᴛ Support [Support](https://t.me/bisal_files) They Wɪʟʟ Hᴇʟᴘ Yᴏᴜ**",
-
-                    disable_web_page_preview=True
-                )
+                await c.send_message(chat_id=m.chat.id, text="You are banned and cannot use this bot.", disable_web_page_preview=True)
                 return
         except UserNotParticipant:
-            await c.send_photo(
-                chat_id=m.chat.id,
-                photo="https://telegra.ph/file/5eb253f28ed7ed68cb4e6.png",
-                caption=""""<b>Hᴇʏ ᴛʜᴇʀᴇ!\n\nPʟᴇᴀsᴇ ᴊᴏɪɴ ᴏᴜʀ ᴜᴘᴅᴀᴛᴇs ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ ! 😊\n\nDᴜᴇ ᴛᴏ sᴇʀᴠᴇʀ ᴏᴠᴇʀʟᴏᴀᴅ, ᴏɴʟʏ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ sᴜʙsᴄʀɪʙᴇʀs ᴄᴀɴ ᴜsᴇ ᴛʜɪs ʙᴏᴛ !</b>""",
-                reply_markup=InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton("Jᴏɪɴ ɴᴏᴡ 🚩", url=f"https://t.me/{Var.UPDATES_CHANNEL}")
-                        ]
-                    ]
-                ),
-
-            )
+            await c.send_photo(chat_id=m.chat.id, photo="https://telegra.ph/file/5eb253f28ed7ed68cb4e6.png", caption=""""<b>Hᴇʏ ᴛʜᴇʀᴇ!\n\nPʟᴇᴀsᴇ ᴊᴏɪɴ ᴏᴜʀ ᴜᴘᴅᴀᴛᴇs ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ ! 😊</b>""", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Jᴏɪɴ ɴᴏᴡ 🚩", url=f"https://t.me/{Var.UPDATES_CHANNEL}")]]))
             return
         except Exception as e:
-            await m.reply_text(e)
-            await c.send_message(
-                chat_id=m.chat.id,
-                text="**Sᴏᴍᴇᴛʜɪɴɢ ᴡᴇɴᴛ Wʀᴏɴɢ. Cᴏɴᴛᴀᴄᴛ ᴍʏ Support** [Support](https://t.me/bisal_files)",
-
-                disable_web_page_preview=True)
-            return
+            print(f"Error checking updates channel: {e}. Make sure the bot is an admin in the channel.")
+            
     ban_chk = await db.is_banned(int(m.from_user.id))
-    if ban_chk == True:
+    if ban_chk:
         return await m.reply(Var.BAN_ALERT)
+        
     try:
         log_msg = await m.forward(chat_id=Var.BIN_CHANNEL)
-        stream_link = f"{Var.URL}watch/{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
-        online_link = f"{Var.URL}{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
+        file_name = get_name(log_msg)
+        file_hash = get_hash(log_msg)
+        file_size = get_media_file_size(m)
+        
+        save_last_file_details(log_msg.id, file_name, file_hash)
+        
+        # --- UPDATE USER STATS ---
+        await db.update_user_stats(m.from_user.id, file_size)
 
-        await log_msg.reply_text(text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{m.from_user.first_name}](tg://user?id={m.from_user.id})\n**Uꜱᴇʀ ɪᴅ :** `{m.from_user.id}`\n**Stream ʟɪɴᴋ :** {stream_link}", disable_web_page_preview=True,  quote=True)
-        await m.reply_text(
-            text=msg_text.format(get_name(log_msg), humanbytes(get_media_file_size(m)), online_link, stream_link),
-            quote=True,
-            disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("sᴛʀᴇᴀᴍ 🔺", url=stream_link), #Stream Link
-                                                InlineKeyboardButton('ᴅᴏᴡɴʟᴏᴀᴅ 🔻', url=online_link)]]) #Download Link
-        )
-    except FloodWait as e:
-        print(f"Sleeping for {str(e.x)}s")
-        await asyncio.sleep(e.x)
-        await c.send_message(chat_id=Var.BIN_CHANNEL, text=f"Gᴏᴛ FʟᴏᴏᴅWᴀɪᴛ ᴏғ {str(e.x)}s from [{m.from_user.first_name}](tg://user?id={m.from_user.id})\n\n**𝚄𝚜𝚎𝚛 𝙸𝙳 :** `{str(m.from_user.id)}`", disable_web_page_preview=True)
+        stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+        online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+        
+        await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+    except Exception as e:
+        print(f"Error in private_receive_handler link generation: {e}")
 
-@StreamBot.on_message(filters.channel & ~filters.group & (filters.document | filters.video | filters.photo)  & ~filters.forwarded, group=-1)
+@StreamBot.on_message(filters.channel & (filters.document | filters.video | filters.photo) & ~filters.forwarded, group=-1)
 async def channel_receive_handler(bot, broadcast):
-    if Var.AUTH_USERS and str(broadcast.from_user.id) not in Var.AUTH_USERS:
-        await broadcast.reply_text("This is a private bot!", True)
-        return
-    if int(broadcast.chat.id) in Var.BAN_CHNL:
-        print("chat trying to get straming link is found in BAN_CHNL,so im not going to give stram link")
-        return
-    ban_chk = await db.is_banned(int(broadcast.chat.id))
-    if (int(broadcast.chat.id) in Var.BANNED_CHANNELS) or (ban_chk == True):
+    is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
+    if is_bot_locked and not await db.is_user_authorized(broadcast.chat.id):
         await bot.leave_chat(broadcast.chat.id)
         return
     try:
         log_msg = await broadcast.forward(chat_id=Var.BIN_CHANNEL)
-        stream_link = f"{Var.URL}watch/{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
-        online_link = f"{Var.URL}{str(log_msg.id)}/{quote_plus(get_name(log_msg))}?hash={get_hash(log_msg)}"
-        await log_msg.reply_text(
-            text=f"**Channel Name:** `{broadcast.chat.title}`\n**CHANNEL ID:** `{broadcast.chat.id}`\n**Rᴇǫᴜᴇsᴛ ᴜʀʟ:** {stream_link}",
-            quote=True
-        )
-        await bot.edit_message_reply_markup(
-            chat_id=broadcast.chat.id,
-            message_id=broadcast.id,
-            reply_markup=InlineKeyboardMarkup(
-                [
-                    [InlineKeyboardButton("sᴛʀᴇᴀᴍ 🔺", url=stream_link),
-                    InlineKeyboardButton('ᴅᴏᴡɴʟᴏᴀᴅ 🔻', url=online_link)]
-                ]
-            )
-        )
-    except FloodWait as w:
-        print(f"Sleeping for {str(w.x)}s")
-        await asyncio.sleep(w.x)
-        await bot.send_message(chat_id=Var.BIN_CHANNEL,
-                            text=f"GOT FLOODWAIT OF {str(w.x)}s FROM {broadcast.chat.title}\n\n**CHANNEL ID:** `{str(broadcast.chat.id)}`",
-                            disable_web_page_preview=True)
+        file_name = get_name(log_msg)
+        file_hash = get_hash(log_msg)
+        save_last_file_details(log_msg.id, file_name, file_hash)
+        stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+        online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+        await bot.edit_message_reply_markup(chat_id=broadcast.chat.id, message_id=broadcast.id, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
     except Exception as e:
-        await bot.send_message(chat_id=Var.BIN_CHANNEL, text=f"**#ERROR_TRACKEBACK:** `{e}`", disable_web_page_preview=True)
-        print(f"Cᴀɴ'ᴛ Eᴅɪᴛ Bʀᴏᴀᴅᴄᴀsᴛ Mᴇssᴀɢᴇ!\nEʀʀᴏʀ:  **Give me edit permission in updates and bin Channel!{e}**")
+        print(f"Error in channel handler: {e}")
+
+@StreamBot.on_message(filters.group & (filters.document | filters.video | filters.audio | filters.photo) & ~filters.forwarded, group=5)
+async def group_receive_handler(bot: Client, m: Message):
+    is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
+    if is_bot_locked and not await db.is_user_authorized(m.chat.id):
+        return
+    try:
+        log_msg = await m.forward(chat_id=Var.BIN_CHANNEL)
+        file_name = get_name(log_msg)
+        file_hash = get_hash(log_msg)
+        file_size = get_media_file_size(m)
+        
+        save_last_file_details(log_msg.id, file_name, file_hash)
+        
+        # --- UPDATE USER STATS ---
+        if m.from_user: # Ensure there is a user to attribute the stats to
+            await db.update_user_stats(m.from_user.id, file_size)
+
+        stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+        online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
+        
+        await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+    except Exception as e:
+        print(f"Error in group handler: {e}")
