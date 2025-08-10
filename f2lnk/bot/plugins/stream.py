@@ -1,5 +1,6 @@
 import os
 import asyncio
+import datetime
 
 from pyrogram import filters, Client
 from pyrogram.errors import FloodWait, UserNotParticipant
@@ -13,6 +14,7 @@ from f2lnk.vars import Var
 from f2lnk.utils.file_properties import get_name, get_hash, get_media_file_size
 
 db = Database(Var.DATABASE_URL, Var.name)
+MAINTENANCE_FILE = "maintenance.txt"
 
 msg_text ="""<b>‣ ʏᴏᴜʀ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ! 😎
 
@@ -30,8 +32,17 @@ def save_last_file_details(message_id, file_name, file_hash):
     last_file_for_test['name'] = file_name
     last_file_for_test['hash'] = file_hash
 
+def is_maintenance_mode():
+    """Helper function to check for maintenance mode."""
+    return os.path.exists(MAINTENANCE_FILE)
+
 @StreamBot.on_message(filters.private & (filters.document | filters.video | filters.audio | filters.photo) , group=4)
 async def private_receive_handler(c: Client, m: Message):
+    # --- NEW --- Feature 3: Maintenance Mode Check
+    if is_maintenance_mode() and m.from_user.id not in Var.OWNER_ID:
+        await m.reply_text("The bot is currently under maintenance. Please try again later.", quote=True)
+        return
+
     if m.from_user.id not in Var.OWNER_ID:
         is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
         if is_bot_locked:
@@ -60,7 +71,24 @@ async def private_receive_handler(c: Client, m: Message):
     ban_chk = await db.is_banned(int(m.from_user.id))
     if ban_chk:
         return await m.reply(Var.BAN_ALERT)
+    
+    # --- NEW --- Feature 2: Daily Usage Limit Check
+    if m.from_user.id not in Var.OWNER_ID:
+        user_data = await db.get_user_info(m.from_user.id)
+        file_size = get_media_file_size(m)
+        limit_in_bytes = Var.DAILY_LIMIT_GB * 1024 * 1024 * 1024
+
+        today = datetime.date.today().isoformat()
+        if user_data.get("last_reset_date") != today:
+            await db.reset_daily_usage(m.from_user.id)
+            user_data['daily_data_used'] = 0 # Reset for current check
         
+        if user_data.get("daily_data_used", 0) + file_size > limit_in_bytes:
+            await m.reply_text(f"You have reached your daily limit of **{Var.DAILY_LIMIT_GB} GB**.\n"
+                               f"Your usage today: **{humanbytes(user_data.get('daily_data_used', 0))}**.\n"
+                               "Please try again tomorrow.", quote=True)
+            return
+
     try:
         log_msg = await m.forward(chat_id=Var.BIN_CHANNEL)
         file_name = get_name(log_msg)
@@ -69,18 +97,33 @@ async def private_receive_handler(c: Client, m: Message):
         
         save_last_file_details(log_msg.id, file_name, file_hash)
         
-        # --- UPDATE USER STATS ---
         await db.update_user_stats(m.from_user.id, file_size)
 
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         
         await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+
+        # --- NEW --- Feature 1: Link Logging
+        log_text = (
+            f"**Link Generated (Private)**\n\n"
+            f"**User:** [{m.from_user.first_name}](tg://user?id={m.from_user.id})\n"
+            f"**User ID:** `{m.from_user.id}`\n"
+            f"**File:** `{file_name}`\n"
+            f"**Size:** `{humanbytes(file_size)}`\n"
+            f"**Download:** [Click Here]({online_link})"
+        )
+        await c.send_message(Var.LOG_CHANNEL, log_text, disable_web_page_preview=True)
+
     except Exception as e:
         print(f"Error in private_receive_handler link generation: {e}")
 
 @StreamBot.on_message(filters.channel & (filters.document | filters.video | filters.photo) & ~filters.forwarded, group=-1)
 async def channel_receive_handler(bot, broadcast):
+    # --- NEW --- Feature 3: Maintenance Mode Check
+    if is_maintenance_mode():
+        return
+        
     is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
     if is_bot_locked and not await db.is_user_authorized(broadcast.chat.id):
         await bot.leave_chat(broadcast.chat.id)
@@ -88,19 +131,57 @@ async def channel_receive_handler(bot, broadcast):
     try:
         log_msg = await broadcast.forward(chat_id=Var.BIN_CHANNEL)
         file_name = get_name(log_msg)
+        file_size = get_media_file_size(broadcast)
         file_hash = get_hash(log_msg)
         save_last_file_details(log_msg.id, file_name, file_hash)
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         await bot.edit_message_reply_markup(chat_id=broadcast.chat.id, message_id=broadcast.id, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+        
+        # --- NEW --- Feature 1: Link Logging
+        log_text = (
+            f"**Link Generated (Channel)**\n\n"
+            f"**Channel:** {broadcast.chat.title}\n"
+            f"**Channel ID:** `{broadcast.chat.id}`\n"
+            f"**File:** `{file_name}`\n"
+            f"**Size:** `{humanbytes(file_size)}`\n"
+            f"**Download:** [Click Here]({online_link})"
+        )
+        await bot.send_message(Var.LOG_CHANNEL, log_text, disable_web_page_preview=True)
+
     except Exception as e:
         print(f"Error in channel handler: {e}")
 
 @StreamBot.on_message(filters.group & (filters.document | filters.video | filters.audio | filters.photo) & ~filters.forwarded, group=5)
 async def group_receive_handler(bot: Client, m: Message):
+    # --- NEW --- Feature 3: Maintenance Mode Check
+    if is_maintenance_mode() and m.from_user and m.from_user.id not in Var.OWNER_ID:
+        # Don't send message in group to avoid spam, just return.
+        return
+
     is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
     if is_bot_locked and not await db.is_user_authorized(m.chat.id):
         return
+
+    # --- NEW --- Feature 2: Daily Usage Limit Check
+    if m.from_user and m.from_user.id not in Var.OWNER_ID:
+        if not await db.is_user_exist(m.from_user.id):
+            await db.add_user(m.from_user.id)
+            await bot.send_message(Var.BIN_CHANNEL, f"New User Joined! : \n\n Name : [{m.from_user.first_name}](tg://user?id={m.from_user.id}) Started Your Bot!!")
+        
+        user_data = await db.get_user_info(m.from_user.id)
+        file_size_for_limit = get_media_file_size(m)
+        limit_in_bytes = Var.DAILY_LIMIT_GB * 1024 * 1024 * 1024
+
+        today = datetime.date.today().isoformat()
+        if user_data.get("last_reset_date") != today:
+            await db.reset_daily_usage(m.from_user.id)
+            user_data['daily_data_used'] = 0 # Reset for current check
+        
+        if user_data.get("daily_data_used", 0) + file_size_for_limit > limit_in_bytes:
+            # Don't send message in group to avoid spam, just return.
+            return
+
     try:
         log_msg = await m.forward(chat_id=Var.BIN_CHANNEL)
         file_name = get_name(log_msg)
@@ -109,13 +190,27 @@ async def group_receive_handler(bot: Client, m: Message):
         
         save_last_file_details(log_msg.id, file_name, file_hash)
         
-        # --- UPDATE USER STATS ---
-        if m.from_user: # Ensure there is a user to attribute the stats to
+        if m.from_user:
             await db.update_user_stats(m.from_user.id, file_size)
 
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         
         await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+
+        # --- NEW --- Feature 1: Link Logging
+        if m.from_user:
+            log_text = (
+                f"**Link Generated (Group)**\n\n"
+                f"**Group:** {m.chat.title}\n"
+                f"**Group ID:** `{m.chat.id}`\n"
+                f"**User:** [{m.from_user.first_name}](tg://user?id={m.from_user.id})\n"
+                f"**User ID:** `{m.from_user.id}`\n"
+                f"**File:** `{file_name}`\n"
+                f"**Size:** `{humanbytes(file_size)}`\n"
+                f"**Download:** [Click Here]({online_link})"
+            )
+            await bot.send_message(Var.LOG_CHANNEL, log_text, disable_web_page_preview=True)
+
     except Exception as e:
         print(f"Error in group handler: {e}")
