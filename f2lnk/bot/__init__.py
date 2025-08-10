@@ -14,3 +14,7 @@ StreamBot = Client(
 
 multi_clients = {}
 work_loads = {}
+
+# --- NEW: Central location for the speedtest variable ---
+# This makes the system more robust.
+last_file_for_test = {}
