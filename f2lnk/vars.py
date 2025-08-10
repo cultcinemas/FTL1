@@ -15,16 +15,16 @@ class Var(object):
     BOT_TOKEN = str(getenv('BOT_TOKEN' , '7386512270:AAGz668oDH58cDKNvj5VJQ9sNBhpGcW3qBE'))
     name = str(getenv('name', 'bisal_file2link_bot'))
     SLEEP_THRESHOLD = int(getenv('SLEEP_THRESHOLD', '60'))
-    WORKERS = int(getenv('WORKERS', '4'))
-    BIN_CHANNEL = int(getenv('BIN_CHANNEL', '-1002101797163'))
-    NEW_USER_LOG = int(getenv('NEW_USER_LOG', '-1002101797163'))
+    WORKERS = int(getenv('WORKERS', '8'))
+    BIN_CHANNEL = int(getenv('BIN_CHANNEL', '-1002627625468'))
+    NEW_USER_LOG = int(getenv('NEW_USER_LOG', '-1002627625468'))
     # --- NEW --- Feature 1: Log Channel
-    LOG_CHANNEL = int(getenv('LOG_CHANNEL', '-1002101797163')) # Add your Log Channel ID
+    LOG_CHANNEL = int(getenv('LOG_CHANNEL', '-1002627625468')) # Add your Log Channel ID
     PORT = int(getenv('PORT', '8080'))
     BIND_ADRESS = str(getenv('WEB_SERVER_BIND_ADDRESS', '0.0.0.0'))
     PING_INTERVAL = int(environ.get("PING_INTERVAL", "1200"))  # 20 minutes
-    OWNER_ID = [int(x) for x in os.environ.get("OWNER_ID", "1392184089").split()]
-    URL = getenv('URL', 'http://185.55.240.55:3031/')
+    OWNER_ID = [int(x) for x in os.environ.get("OWNER_ID", "1392184089 5602172369").split()]
+    URL = getenv('URL', 'http://185.55.240.55:3030/')
     if not URL.endswith('/'):
         URL = f'{URL}/'
     PORT = getenv('PORT', 8080)
@@ -35,7 +35,7 @@ class Var(object):
     BAN_CHNL = list(set(int(x) for x in str(getenv("BAN_CHNL", "")).split()))
     BAN_ALERT = str(getenv('BAN_ALERT' , '<b>ʏᴏᴜʀ ᴀʀᴇ ʙᴀɴɴᴇᴅ ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ.Pʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ @biisal_bot ᴛᴏ ʀᴇsᴏʟᴠᴇ ᴛʜᴇ ɪssᴜᴇ!!</b>'))
     # --- NEW --- Feature 2: Daily Usage Limit in GB
-    DAILY_LIMIT_GB = int(getenv('DAILY_LIMIT_GB', '10'))
+    DAILY_LIMIT_GB = int(getenv('DAILY_LIMIT_GB', '5'))
     # --- NEW --- Feature 1: User Tiers
     USER_PLANS = {
         "plan1": 20,
