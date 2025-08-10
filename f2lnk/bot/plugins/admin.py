@@ -17,6 +17,7 @@ from f2lnk.vars import Var
 
 db = Database(Var.DATABASE_URL, Var.name)
 Broadcast_IDs = {}
+MAINTENANCE_FILE = "maintenance.txt"
 
 @StreamBot.on_message(filters.command("users") & filters.private & filters.user(Var.OWNER_ID))
 async def sts(c: Client, m: Message):
@@ -43,6 +44,10 @@ async def get_user_info(c: Client, m: Message):
     last_active = user_info.get('last_active_date', 'N/A')
     files_processed = user_info.get('files_processed', 0)
     total_data = user_info.get('total_data_used', 0)
+    # --- NEW --- Feature 2: Daily Usage Limit
+    daily_data = user_info.get('daily_data_used', 0)
+    last_reset = user_info.get('last_reset_date', 'N/A')
+
 
     # Format the response
     text = (
@@ -50,7 +55,8 @@ async def get_user_info(c: Client, m: Message):
         f"Joined: `{join_date}`\n"
         f"Last Active: `{last_active}`\n"
         f"Files Processed: `{files_processed}`\n"
-        f"Total Data Used: `{humanbytes(total_data)}`"
+        f"Total Data Used: `{humanbytes(total_data)}`\n"
+        f"Today's Usage: `{humanbytes(daily_data)}` (Resets on: `{last_reset}`)"
     )
     
     await m.reply_text(text)
@@ -85,20 +91,40 @@ async def unauthorize_user(c: Client, m: Message):
     else:
         await m.reply_text(f"ID `{id_to_unauth}` was not found in the authorized list.")
 
-@StreamBot.on_message(filters.command("authusers") & filters.private & filters.user(Var.OWNER_ID))
+# --- RENAMED COMMAND ---
+@StreamBot.on_message(filters.command("Authorizes") & filters.private & filters.user(Var.OWNER_ID))
 async def show_auth_users(c: Client, m: Message):
     users_cursor = db.get_all_auth_users()
     users = await users_cursor.to_list(length=None) 
     if not users:
         await m.reply_text("No users, channels, or groups have been authorized yet.")
         return
-    text = "📝 **Authorized IDs (Users, Channels & Groups):**\n\n"
+
+    msg = await m.reply_text("Fetching details, please wait...")
+    
+    lines = []
     for user in users:
         if 'user_id' in user:
-            text += f"- `{user['user_id']}`\n"
+            user_id = user['user_id']
+            try:
+                # Get chat info which works for users, groups, and channels
+                chat_info = await c.get_chat(user_id)
+                # 'title' for channels/groups, 'first_name' for users
+                name = chat_info.title or chat_info.first_name
+                lines.append(f"**{name}** - `{user_id}`")
+            except Exception:
+                # If bot can't get info (e.g., not in chat, user deleted), fallback
+                lines.append(f"**Unknown/Inaccessible** - `{user_id}`")
         else:
             print(f"[WARNING] Found a malformed entry in the auth_users collection: {user}")
-    await m.reply_text(text)
+
+    if lines:
+        text = "📝 **Authorized IDs (Users, Channels & Groups):**\n\n" + "\n".join(lines)
+    else:
+        text = "No valid authorized IDs found in the database."
+        
+    await msg.edit_text(text)
+
 
 @StreamBot.on_message(filters.command("broadcast") & filters.private & filters.user(Var.OWNER_ID))
 async def broadcast_(c: Client, m: Message):
@@ -129,6 +155,32 @@ async def broadcast_(c: Client, m: Message):
             failed += 1
     completed_in = datetime.timedelta(seconds=int(time.time() - start_time))
     await out.edit_text(f"Broadcast completed in `{completed_in}`.\n\nTotal Users: {done}\nSuccess: {success}\nFailed: {failed}")
+
+# --- NEW COMMAND --- Feature 3: Maintenance Mode
+@StreamBot.on_message(filters.command("maintenance") & filters.private & filters.user(Var.OWNER_ID))
+async def maintenance_mode(c: Client, m: Message):
+    try:
+        status = m.command[1].lower()
+    except IndexError:
+        await m.reply_text("<b>Usage:</b> /maintenance [on | off]")
+        return
+
+    if status == "on":
+        if os.path.exists(MAINTENANCE_FILE):
+            await m.reply_text("✅ Maintenance mode is already **enabled**.")
+            return
+        with open(MAINTENANCE_FILE, "w") as f:
+            f.write("enabled")
+        await m.reply_text("✅ Maintenance mode has been **enabled**.\n\nAll user requests will be paused.")
+    elif status == "off":
+        if not os.path.exists(MAINTENANCE_FILE):
+            await m.reply_text("✅ Maintenance mode is already **disabled**.")
+            return
+        os.remove(MAINTENANCE_FILE)
+        await m.reply_text("✅ Maintenance mode has been **disabled**.\n\nBot is now fully operational.")
+    else:
+        await m.reply_text("<b>Invalid status.</b> Use `on` or `off`.")
+
 
 @StreamBot.on_message(filters.command("speedtest") & filters.private & filters.user(Var.OWNER_ID))
 async def speed_test(c: Client, m: Message):
