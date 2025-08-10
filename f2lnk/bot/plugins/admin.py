@@ -50,6 +50,9 @@ async def get_user_info(c: Client, m: Message):
     # --- NEW --- Feature 2: Daily Usage Limit
     daily_data = user_info.get('daily_data_used', 0)
     last_reset = user_info.get('last_reset_date', 'N/A')
+    # --- NEW --- Feature 1: User Tiers
+    tier = user_info.get('tier', Var.DEFAULT_PLAN)
+    expiry = user_info.get('plan_expiry_date', 'N/A')
 
 
     # Format the response
@@ -59,10 +62,55 @@ async def get_user_info(c: Client, m: Message):
         f"Last Active: `{last_active}`\n"
         f"Files Processed: `{files_processed}`\n"
         f"Total Data Used: `{humanbytes(total_data)}`\n"
-        f"Today's Usage: `{humanbytes(daily_data)}` (Resets on: `{last_reset}`)"
+        f"Today's Usage: `{humanbytes(daily_data)}` (Resets on: `{last_reset}`)\n"
+        f"Current Plan: `{tier.upper()}`\n"
+        f"Plan Expiry: `{expiry}`"
     )
     
     await m.reply_text(text)
+
+# --- NEW COMMAND --- Feature 1: User Tiers
+@StreamBot.on_message(filters.command("set_tier") & filters.private & filters.user(Var.OWNER_ID))
+async def set_user_tier(c: Client, m: Message):
+    try:
+        user_id = int(m.command[1])
+        tier_name = m.command[2].lower()
+        days = int(m.command[3])
+
+        if tier_name not in Var.USER_PLANS and tier_name != Var.DEFAULT_PLAN:
+            await m.reply_text(f"<b>Invalid tier name.</b>\n\nAvailable plans: `{', '.join(Var.USER_PLANS.keys())}` or use `{Var.DEFAULT_PLAN}` to reset.")
+            return
+            
+    except (IndexError, ValueError):
+        await m.reply_text("<b>Usage:</b> /set_tier <user_id> <tier_name> <days>\n\n<b>Example:</b> `/set_tier 123456 plan1 30`")
+        return
+
+    if not await db.is_user_exist(user_id):
+        await m.reply_text(f"User with ID `{user_id}` is not found in the database.")
+        return
+
+    expiry_date = datetime.date.today() + datetime.timedelta(days=days)
+    await db.set_user_tier(user_id, tier_name, expiry_date)
+    
+    limit = Var.USER_PLANS.get(tier_name, Var.DAILY_LIMIT_GB)
+
+    # Notify Admin
+    await m.reply_text(f"✅ Successfully set plan for user `{user_id}`.\n\n**Plan:** `{tier_name.upper()}`\n**Expires on:** `{expiry_date.isoformat()}`\n**Daily Limit:** `{limit} GB`")
+
+    # Notify User
+    try:
+        notification_text = (
+            f"🎉 **Your Plan Has Been Updated!** 🎉\n\n"
+            f"An admin has set your account to the **{tier_name.upper()}** plan.\n\n"
+            f"**Benefits:**\n"
+            f"- Daily Bandwidth Limit: **{limit} GB**\n"
+            f"- Your plan is valid until: **{expiry_date.isoformat()}**\n\n"
+            f"Enjoy the enhanced features!"
+        )
+        await c.send_message(chat_id=user_id, text=notification_text)
+    except Exception as e:
+        await m.reply_text(f"Couldn't send notification to user `{user_id}`. **Error:** `{e}`")
+
 
 @StreamBot.on_message(filters.command("authorize") & filters.private & filters.user(Var.OWNER_ID))
 async def authorize_user(c: Client, m: Message):
