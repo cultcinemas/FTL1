@@ -6,6 +6,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from f2lnk.bot import StreamBot
 from f2lnk.utils.database import Database
+from f2lnk.utils.human_readable import humanbytes
 from f2lnk.vars import Var
 
 db = Database(Var.DATABASE_URL, Var.name)
@@ -141,6 +142,49 @@ async def help_cd(b, m):
         ]
     )
 )
+
+# --- NEW COMMAND: /myplan ---
+@StreamBot.on_message(filters.command("myplan") & filters.private)
+async def myplan_cmd(b, m):
+    if not await db.is_user_exist(m.from_user.id):
+        await db.add_user(m.from_user.id)
+        await b.send_message(
+            Var.NEW_USER_LOG,
+            f"**Nᴇᴡ Usᴇʀ Jᴏɪɴᴇᴅ:** \n\n__Mʏ Nᴇᴡ Fʀɪᴇɴᴅ__ [{m.from_user.first_name}](tg://user?id={m.from_user.id}) __Sᴛᴀʀᴛᴇᴅ Yᴏᴜʀ Bᴏᴛ !!__"
+        )
+
+    # Check for plan expiration
+    await db.check_and_update_tier(m.from_user.id)
+    user_info = await db.get_user_info(m.from_user.id)
+
+    if not user_info:
+        await m.reply_text("Could not fetch your details. Please try again.")
+        return
+
+    # Safely get each piece of info
+    tier = user_info.get('tier', Var.DEFAULT_PLAN)
+    daily_limit_gb = Var.USER_PLANS.get(tier, Var.DAILY_LIMIT_GB)
+    expiry = user_info.get('plan_expiry_date', 'Lifetime (Default)')
+    join_date = user_info.get('join_date', 'N/A')
+    daily_data_used = user_info.get('daily_data_used', 0)
+    total_data_used = user_info.get('total_data_used', 0)
+    last_reset = user_info.get('last_reset_date', 'N/A')
+
+    # Format the response
+    text = (
+        f"**👤 Your Plan Details**\n\n"
+        f"**Plan:** `{tier.upper()}`\n"
+        f"**Plan Expiry:** `{expiry}`\n"
+        f"**Joined On:** `{join_date}`\n\n"
+        f"**📊 Usage Stats**\n"
+        f"**Daily Usage:** `{humanbytes(daily_data_used)}` / `{daily_limit_gb} GB`\n"
+        f"**Total Usage:** `{humanbytes(total_data_used)}`\n"
+        f"**Usage Resets On:** `{last_reset}`"
+    )
+
+    await m.reply_text(text, quote=True)
+
+
 @StreamBot.on_message(filters.command('ban') & filters.user(Var.OWNER_ID))
 async def do_ban(bot ,  message):
     userid = message.text.split(" ", 2)[1] if len(message.text.split(" ", 1)) > 1 else None
@@ -232,7 +276,7 @@ async def cb_handler(client, query):
         )
     elif data == "help":
         await query.message.edit_caption(
-        caption=f"<b>ᴡᴇ ᴅᴏɴᴛ ɴᴇᴇᴅ ᴍᴀɴʏ <a href='https://t.me/bisal_files'>ᴄᴏᴍᴍᴀɴᴅs</a> ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ 🤩.\n\nᴊᴜsᴛ sᴇɴᴅ ᴍᴇ <a href='https://t.me/bisal_files'>ᴠɪᴅᴇᴏ ғɪʟᴇs</a> ᴀɴᴅ ɪ ᴡɪʟʟ ɢɪᴠᴇ ʏᴏᴜ <a href='https://t.me/bisal_files'>ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ & sᴛʀᴇᴀᴍᴀʙʟᴇ</a> ʟɪɴᴋ.\n\nᴏʀ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍᴇ ɪɴ <a href='https://t.me/bisal_files'>ʏᴏᴜʀ ᴄʜᴀɴɴᴇʟ</a>..ᴊᴜsᴛ ᴀᴅᴅ ᴍᴇ ᴀɴᴅ ᴍᴀᴋᴇ ᴍᴇ ᴀᴅᴍɪɴ ᴀɴᴅ sᴇᴇ ᴍʏ ᴍᴀɢɪᴄ 😎</b>",
+        caption=f"<b>ᴡᴇ ᴅᴏɴᴛ ɴᴇᴇᴅ ᴍᴀɴʏ <a href='https://t.me/bisal_files'>ᴄᴏᴍᴍᴀɴᴅs</a> ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ 🤩.\n\nᴊᴜsᴛ sᴇɴᴅ ᴍᴇ <a href='https.t.me/bisal_files'>ᴠɪᴅᴇᴏ ғɪʟᴇs</a> ᴀɴᴅ ɪ ᴡɪʟʟ ɢɪᴠᴇ ʏᴏᴜ <a href='https://t.me/bisal_files'>ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ & sᴛʀᴇᴀᴍᴀʙʟᴇ</a> ʟɪɴᴋ.\n\nᴏʀ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍᴇ ɪɴ <a href='https://t.me/bisal_files'>ʏᴏᴜʀ ᴄʜᴀɴɴᴇʟ</a>..ᴊᴜsᴛ ᴀᴅᴅ ᴍᴇ ᴀɴᴅ ᴍᴀᴋᴇ ᴍᴇ ᴀᴅᴍɪɴ ᴀɴᴅ sᴇᴇ ᴍʏ ᴍᴀɢɪᴄ 😎</b>",
             reply_markup=InlineKeyboardMarkup(
 [[
                      InlineKeyboardButton("ʜᴏᴍᴇ", callback_data="start"),
