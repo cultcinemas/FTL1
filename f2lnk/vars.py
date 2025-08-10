@@ -36,4 +36,12 @@ class Var(object):
     BAN_ALERT = str(getenv('BAN_ALERT' , '<b>ʏᴏᴜʀ ᴀʀᴇ ʙᴀɴɴᴇᴅ ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ.Pʟᴇᴀsᴇ ᴄᴏɴᴛᴀᴄᴛ @biisal_bot ᴛᴏ ʀᴇsᴏʟᴠᴇ ᴛʜᴇ ɪssᴜᴇ!!</b>'))
     # --- NEW --- Feature 2: Daily Usage Limit in GB
     DAILY_LIMIT_GB = int(getenv('DAILY_LIMIT_GB', '10'))
+    # --- NEW --- Feature 1: User Tiers
+    USER_PLANS = {
+        "plan1": 20,
+        "plan2": 50,
+        "plan3": 100
+    }
+    DEFAULT_PLAN = "default"
+    
     MULTI_TOKENS = getenv('MULTI_TOKENS', '7558301240:AAFQ56rgaKD1UZ2xsVx9xAsohFCDWGDITDM 7648213081:AAERq5BphyLLbSa_A9ssY56UTZZuYtJ_pSs 7986368427:AAE8ncphFRtkl4b3RSjwKT_LbxFKuXp5FTM 7933025708:AAFg2Ru4tZoZ46UOidkK4ksLUuwLa_7XALs 7874301381:AAEpIbBSSbbDxhKUpoAE4s8zeaxVF_ykKyM 7656364400:AAEGoVoUCXvjoQcAO2GyzwpcTVlXkWoE6Z8 8048965809:AAEQZOja-aNNHiINBihVsehvIIo1DEnDELM 7576471028:AAH91c5MjKLIqiWB4DN79v0VoBYRMI29oqw 8006698778:AAELDwINICfcuRJPGJQiUR-1Qf6uZrCqH2A 7937350226:AAHbnksthkjIcwcskz5IKfVBu12lgVXLuvg 7670657219:AAEC48szzPAFmUEljo3PXaEzuU52LHyEjQo 7681049237:AAEHBMC6x_yfkVxD5TTKmk3Hp7NXWtVqO7w 8105409082:AAEZeoSHga_OTI6BYCt5SAyVzqv5VLdqYYo 7728245130:AAEZQ0-jv0HMyNg6zMCiRqY_b-ltAtBXsE4')
