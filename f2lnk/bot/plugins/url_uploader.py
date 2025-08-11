@@ -1,3 +1,5 @@
+# f2lnk/bot/plugins/url_uploader.py
+
 import os
 import time
 import aiohttp
@@ -12,25 +14,14 @@ from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified
 from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from pyromod.exceptions import ListenerTimeout
 
-from f2lnk.bot import StreamBot
+from f2lnk.bot import StreamBot, ACTIVE_UPLOADS, ACTIVE_TWITTER_TASKS
 from f2lnk.vars import Var
 from f2lnk.utils.database import Database
 from f2lnk.utils.human_readable import humanbytes
 from f2lnk.utils.file_properties import get_name, get_hash
 
 db = Database(Var.DATABASE_URL, Var.name)
-msg_text ="""<b>‣ ʏᴏᴜʀ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ! 😎
 
-‣ Fɪʟᴇ ɴᴀᴍᴇ : <i>{}</i>
-‣ Fɪʟᴇ ꜱɪᴢᴇ : {}
-
-🔻 <a href="{}">𝗙𝗔𝗦𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗</a>
-🔺 <a href="{}">𝗪𝗔𝗧𝗖𝗛 𝗢𝗡𝗟𝗜𝗡𝗘</a>
-
-‣ ɢᴇᴛ <a href="https://t.me/+PA8OPL2Zglk3MDM1">ᴍᴏʀᴇ ғɪʟᴇs</a></b> 🤡"""
-
-# Dictionary to keep track of active upload tasks for each user
-ACTIVE_UPLOADS = {}
 # Set the maximum file size to 1.95 GB to avoid Telegram API errors
 MAX_FILE_SIZE = 1.95 * 1024 * 1024 * 1024
 
@@ -202,12 +193,17 @@ async def _start_upload_process(c: Client, m: Message):
 
         file_name = get_name(log_msg)
         file_hash = get_hash(log_msg)
-        file_size = os.path.getsize(file_save_path)
 
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         
-        final_caption = msg_text.format(file_name, humanbytes(file_size), online_link, stream_link)
+        # --- NEW: Fetch footer and create custom caption for media ---
+        user_info = await db.get_user_info(m.from_user.id)
+        footer = user_info.get("footer", "")
+        
+        final_caption = f"**{file_name}**"
+        if footer:
+            final_caption += f"\n\n{footer}"
         
         if log_msg.video:
             await c.send_video(
@@ -245,7 +241,8 @@ async def _start_upload_process(c: Client, m: Message):
 
 @StreamBot.on_message(filters.command("upload") & filters.private)
 async def url_upload_handler(c: Client, m: Message):
-    if m.from_user.id in ACTIVE_UPLOADS:
+    # For regular users, check if they have any active tasks. Admins can bypass this.
+    if m.from_user.id not in Var.OWNER_ID and m.from_user.id in ACTIVE_UPLOADS and ACTIVE_UPLOADS.get(m.from_user.id):
         await m.reply_text("You already have an active upload process. Please wait for it to complete or use /cancel.", quote=True)
         return
         
@@ -253,31 +250,51 @@ async def url_upload_handler(c: Client, m: Message):
         await m.reply_text("<b>Usage:</b> /upload <direct_file_link> or reply to a link.")
         return
 
+    # Initialize the list of tasks for the user if it doesn't exist
+    if m.from_user.id not in ACTIVE_UPLOADS:
+        ACTIVE_UPLOADS[m.from_user.id] = []
+
     # Create and track the task
     task = asyncio.create_task(_start_upload_process(c, m))
-    ACTIVE_UPLOADS[m.from_user.id] = task
+    ACTIVE_UPLOADS[m.from_user.id].append(task)
 
     try:
         await task
     except CancelledError:
-        # This is a safeguard; primary handling is within _start_upload_process
         pass
     finally:
         # Ensure the user's task is always removed from the active list
-        ACTIVE_UPLOADS.pop(m.from_user.id, None)
+        if m.from_user.id in ACTIVE_UPLOADS:
+            try:
+                ACTIVE_UPLOADS[m.from_user.id].remove(task)
+                if not ACTIVE_UPLOADS[m.from_user.id]:
+                    ACTIVE_UPLOADS.pop(m.from_user.id, None)
+            except ValueError:
+                # Task might have been removed by the cancel command already
+                pass
 
 
 @StreamBot.on_message(filters.command("cancel") & filters.private)
-async def cancel_upload_handler(c: Client, m: Message):
-    task = ACTIVE_UPLOADS.get(m.from_user.id)
-    if not task:
-        await m.reply_text("You don't have any active upload process to cancel.", quote=True)
-        return
-    
-    if task.done() or task.cancelled():
-        await m.reply_text("The process is already completed or cancelled.", quote=True)
-        ACTIVE_UPLOADS.pop(m.from_user.id, None)
-        return
+async def universal_cancel_handler(c: Client, m: Message):
+    user_id = m.from_user.id
+    cancelled_uploads = 0
+    cancelled_twitter = 0
 
-    # Cancel the task
-    task.cancel()
+    # Cancel URL Upload tasks
+    if tasks := ACTIVE_UPLOADS.pop(user_id, None):
+        cancelled_uploads = len(tasks)
+        for task in tasks:
+            if not task.done() and not task.cancelled():
+                task.cancel()
+
+    # Cancel Twitter tasks
+    if tasks := ACTIVE_TWITTER_TASKS.pop(user_id, None):
+        cancelled_twitter = len(tasks)
+        for task in tasks:
+            if not task.done() and not task.cancelled():
+                task.cancel()
+
+    if cancelled_uploads > 0 or cancelled_twitter > 0:
+        await m.reply_text(f"✅ Successfully cancelled {cancelled_uploads} upload task(s) and {cancelled_twitter} Twitter task(s).", quote=True)
+    else:
+        await m.reply_text("You have no active processes to cancel.", quote=True)
