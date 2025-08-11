@@ -1,3 +1,5 @@
+# f2lnk/bot/plugins/twitter.py
+
 import re
 import aiohttp
 import asyncio
@@ -13,15 +15,12 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
 from pyromod.exceptions import ListenerTimeout
 
-from f2lnk.bot import StreamBot
+from f2lnk.bot import StreamBot, ACTIVE_TWITTER_TASKS
 from f2lnk.vars import Var
 from f2lnk.utils.database import Database
 from f2lnk.utils.human_readable import humanbytes
 from f2lnk.utils.file_properties import get_name, get_hash
 from f2lnk.bot.plugins.stream import is_maintenance_mode
-
-# --- NEW: Dictionary to track active user tasks ---
-ACTIVE_TWITTER_TASKS = {}
 
 db = Database(Var.DATABASE_URL, Var.name)
 MAX_FILE_SIZE = 1.95 * 1024 * 1024 * 1024
@@ -31,6 +30,7 @@ class APIException(Exception):
     pass
 
 async def get_tweet_media(tweet_id: str):
+    """Fetches all media items (videos and images) from a tweet."""
     api_url = f'https://api.vxtwitter.com/Twitter/status/{tweet_id}'
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url) as resp:
@@ -48,7 +48,7 @@ async def get_tweet_media(tweet_id: str):
                 raise APIException('API returned an invalid response.')
 
 async def _run_twitter_process(c: Client, m: Message):
-    """ The core, cancellable logic for handling a Twitter URL. """
+    """The core, cancellable logic for handling a Twitter URL."""
     status_msg = None
     download_dir = f"downloads/{m.from_user.id}_{int(datetime.datetime.now().timestamp())}/"
     
@@ -64,13 +64,6 @@ async def _run_twitter_process(c: Client, m: Message):
             await status_msg.edit("This tweet contains no downloadable media.")
             return
 
-        custom_caption = None
-        try:
-            ask_caption = await c.ask(chat_id=m.chat.id, text="You can now send a custom caption for the generated links, or send /skip to use the default format.\n\n You can use /cancel to stop this process.", timeout=180)
-            if ask_caption.text and ask_caption.text.lower() != "/skip":
-                custom_caption = ask_caption.text
-        except ListenerTimeout: pass
-
         for item_index, item in enumerate(media_items):
             media_url, media_type, thumb_url = item.get('url'), item.get('type'), item.get('thumbnail_url')
             if not media_url: continue
@@ -79,7 +72,7 @@ async def _run_twitter_process(c: Client, m: Message):
             new_filename = original_filename
             
             try:
-                ask_filename = await c.ask(chat_id=m.chat.id, text=f"**File {item_index + 1}/{len(media_items)}:** `{original_filename}`\n\nSend a new filename including extension, or /skip.", timeout=180)
+                ask_filename = await c.ask(chat_id=m.chat.id, text=f"**File {item_index + 1}/{len(media_items)}:** `{original_filename}`\n\nSend a new filename including extension, or send /skip to use the default.", timeout=180)
                 if ask_filename.text and ask_filename.text.lower() != "/skip":
                     new_filename = ask_filename.text
             except ListenerTimeout:
@@ -99,13 +92,14 @@ async def _run_twitter_process(c: Client, m: Message):
                 continue
 
             if m.from_user.id not in Var.OWNER_ID:
-                # Bandwidth checking logic
+                # Bandwidth checking logic can be placed here
                 pass
             
             download_path, thumb_path = None, None
             os.makedirs(download_dir, exist_ok=True)
 
-            if media_type == 'video' and thumb_url:
+            # Download thumbnail for both videos and images (if available)
+            if thumb_url:
                 thumb_path = os.path.join(download_dir, "thumb.jpg")
                 async with aiohttp.ClientSession() as session, session.get(thumb_url) as resp:
                     with open(thumb_path, 'wb') as f:
@@ -120,9 +114,13 @@ async def _run_twitter_process(c: Client, m: Message):
                         await asyncio.sleep(0) # Allow cancellation to interrupt here
 
             await status_msg.edit(f"⬆️ Uploading **{new_filename}**...")
-            log_msg = await (c.send_video if media_type in ['video','gif'] else c.send_photo)(Var.BIN_CHANNEL, download_path, thumb=thumb_path, file_name=new_filename)
             
-            # --- REQUIREMENT 1: Detailed Dump Channel Log ---
+            # --- MODIFIED: Upload images as documents to preserve quality ---
+            if media_type in ['video', 'gif']:
+                log_msg = await c.send_video(Var.BIN_CHANNEL, download_path, thumb=thumb_path, file_name=new_filename)
+            else: # Send images and other types as files
+                log_msg = await c.send_document(Var.BIN_CHANNEL, download_path, thumb=thumb_path, file_name=new_filename)
+
             dump_log_text = (f"**File:** **{new_filename}**\n"
                              f"**User:** [{m.from_user.first_name}](tg://user?id={m.from_user.id})\n"
                              f"**User ID:** `{m.from_user.id}`\n"
@@ -134,12 +132,19 @@ async def _run_twitter_process(c: Client, m: Message):
             download = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
             markup = InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream), InlineKeyboardButton('DOWNLOAD 🔻', url=download)]])
             
-            # --- REQUIREMENT 3: Bold Formatting ---
-            caption = f"📂 **File:** **{file_name}**\n📦 **Size:** **{humanbytes(file_size)}**"
-            if custom_caption:
-                caption = f"{custom_caption}\n\n{caption}"
-
-            await (m.reply_video if log_msg.video else m.reply_photo)(log_msg.video.file_id if log_msg.video else log_msg.photo.file_id, caption=caption, reply_markup=markup, quote=True)
+            # --- NEW: Fetch footer and create custom caption ---
+            user_info = await db.get_user_info(m.from_user.id)
+            footer = user_info.get("footer", "")
+            
+            caption = f"**{file_name}**"
+            if footer:
+                caption += f"\n\n{footer}"
+            
+            # --- MODIFIED: Reply with correct media type and new caption ---
+            if log_msg.video:
+                await m.reply_video(log_msg.video.file_id, caption=caption, reply_markup=markup, quote=True)
+            else:
+                await m.reply_document(log_msg.document.file_id, caption=caption, reply_markup=markup, quote=True)
             
             await db.update_user_stats(m.from_user.id, file_size)
             await c.send_message(Var.LOG_CHANNEL, f"**Link Generated (Twitter)**\n\n**User:** **{m.from_user.first_name}** (`{m.from_user.id}`)\n**File:** **{file_name}**\n**Download:** [Click Here]({download})", disable_web_page_preview=True)
@@ -162,39 +167,33 @@ async def twitter_task_handler(c: Client, m: Message):
     """Starts and manages the Twitter download task."""
     user_id = m.from_user.id
     
-    if user_id in ACTIVE_TWITTER_TASKS:
+    # For regular users, check if they have any active tasks. Admins can bypass this.
+    if user_id not in Var.OWNER_ID and user_id in ACTIVE_TWITTER_TASKS and ACTIVE_TWITTER_TASKS.get(user_id):
         await m.reply_text("You already have an active process running. Please wait for it to complete or use /cancel.", quote=True)
         return
 
-    # Initial checks (auth, ban, maintenance)
+    # Initial checks (auth, ban, maintenance) can be placed here
     if await db.is_banned(user_id):
         await m.reply_text(Var.BAN_ALERT, quote=True)
         return
-    # (Other initial checks can be added here as needed)
+
+    # Initialize the list of tasks for the user if it doesn't exist
+    if user_id not in ACTIVE_TWITTER_TASKS:
+        ACTIVE_TWITTER_TASKS[user_id] = []
 
     task = asyncio.create_task(_run_twitter_process(c, m))
-    ACTIVE_TWITTER_TASKS[user_id] = task
+    ACTIVE_TWITTER_TASKS[user_id].append(task)
     try:
         await task
     except CancelledError:
-        pass
+        pass # The task itself handles the cancellation message
     finally:
-        ACTIVE_TWITTER_TASKS.pop(user_id, None)
-
-@StreamBot.on_message(filters.command("cancel") & filters.private)
-async def cancel_twitter_task(c: Client, m: Message):
-    """--- REQUIREMENT 2: Handles the /cancel command ---"""
-    user_id = m.from_user.id
-    task = ACTIVE_TWITTER_TASKS.get(user_id)
-    
-    if not task:
-        await m.reply_text("You have no active process to cancel.", quote=True)
-        return
-    
-    if task.done() or task.cancelled():
-        await m.reply_text("Your process is already finished or cancelled.", quote=True)
-        ACTIVE_TWITTER_TASKS.pop(user_id, None)
-        return
-
-    task.cancel()
-    # The message "Process successfully cancelled" will be sent by the task itself.
+        # Ensure the user's task is always removed from the active list when it's done
+        if user_id in ACTIVE_TWITTER_TASKS:
+            try:
+                ACTIVE_TWITTER_TASKS[user_id].remove(task)
+                if not ACTIVE_TWITTER_TASKS[user_id]:
+                    ACTIVE_TWITTER_TASKS.pop(user_id, None)
+            except ValueError:
+                # Task might have been removed by the cancel command already
+                pass
