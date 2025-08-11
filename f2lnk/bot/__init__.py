@@ -15,6 +15,12 @@ StreamBot = Client(
 multi_clients = {}
 work_loads = {}
 
+# --- NEW: Central location for task tracking ---
+# Dictionaries to track active user tasks. The value is a list of tasks
+# to support multiple parallel tasks for admins.
+ACTIVE_UPLOADS = {}
+ACTIVE_TWITTER_TASKS = {}
+
 # --- NEW: Central location for the speedtest variable ---
 # This makes the system more robust.
 last_file_for_test = {}
