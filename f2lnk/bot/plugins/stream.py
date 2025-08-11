@@ -1,3 +1,5 @@
+# f2lnk/bot/plugins/stream.py
+
 import os
 import asyncio
 import datetime
@@ -19,6 +21,7 @@ MAINTENANCE_FILE = "maintenance.txt"
 msg_text ="""<b>‣ ʏᴏᴜʀ ʟɪɴᴋ ɢᴇɴᴇʀᴀᴛᴇᴅ ! 😎
 
 ‣ Fɪʟᴇ ɴᴀᴍᴇ : <i>{}</i>
+{}
 ‣ Fɪʟᴇ ꜱɪᴢᴇ : {}
 
 🔻 <a href="{}">𝗙𝗔𝗦𝗧 𝗗𝗢𝗪𝗡𝗟𝗢𝗔𝗗</a>
@@ -108,7 +111,12 @@ async def private_receive_handler(c: Client, m: Message):
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         
-        await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+        user_info = await db.get_user_info(m.from_user.id)
+        footer = user_info.get("footer", "")
+        if footer:
+            footer = f"‣ Fᴏᴏᴛᴇʀ : {footer}"
+        
+        await m.reply_text(text=msg_text.format(file_name, footer, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
 
         # --- NEW --- Feature 1: Link Logging
         log_text = (
@@ -141,7 +149,10 @@ async def channel_receive_handler(bot, broadcast):
         save_last_file_details(log_msg.id, file_name, file_hash)
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
-        await bot.edit_message_reply_markup(chat_id=broadcast.chat.id, message_id=broadcast.id, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+        
+        footer = "" # No user-specific footer in channels
+        
+        await bot.edit_message_text(chat_id=broadcast.chat.id, message_id=broadcast.id, text=msg_text.format(file_name, footer, humanbytes(file_size), online_link, stream_link), disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
         
         log_text = (
             f"**Link Generated (Channel)**\n\n"
@@ -197,13 +208,18 @@ async def group_receive_handler(bot: Client, m: Message):
         
         save_last_file_details(log_msg.id, file_name, file_hash)
         
+        footer = ""
         if m.from_user:
             await db.update_user_stats(m.from_user.id, file_size)
+            user_info = await db.get_user_info(m.from_user.id)
+            footer = user_info.get("footer", "")
+            if footer:
+                footer = f"‣ Fᴏᴏᴛᴇʀ : {footer}"
 
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         
-        await m.reply_text(text=msg_text.format(file_name, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
+        await m.reply_text(text=msg_text.format(file_name, footer, humanbytes(file_size), online_link, stream_link), quote=True, disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
 
         if m.from_user:
             log_text = (
