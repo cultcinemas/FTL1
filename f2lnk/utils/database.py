@@ -1,3 +1,5 @@
+# f2lnk/utils/database.py
+
 import datetime
 import motor.motor_asyncio
 from f2lnk.vars import Var
@@ -22,7 +24,9 @@ class Database:
             last_reset_date=today,
             # --- NEW --- Feature 1: User Tiers
             tier=Var.DEFAULT_PLAN,
-            plan_expiry_date=None
+            plan_expiry_date=None,
+            # --- NEW --- Footer
+            footer=""
         )
 
     async def add_user(self, id):
@@ -36,6 +40,20 @@ class Database:
     async def get_user_info(self, id):
         """Retrieves a user's statistics from the database."""
         return await self.col.find_one({'id': int(id)})
+
+    async def set_footer(self, id, footer):
+        """Sets a user's custom footer."""
+        await self.col.update_one(
+            {'id': int(id)},
+            {'$set': {'footer': footer}}
+        )
+
+    async def remove_footer(self, id):
+        """Removes a user's custom footer."""
+        await self.col.update_one(
+            {'id': int(id)},
+            {'$set': {'footer': ""}}
+        )
 
     async def update_user_stats(self, id, file_size):
         """Increments file count and data usage for a user."""
