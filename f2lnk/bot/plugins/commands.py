@@ -1,3 +1,7 @@
+# f2lnk/bot/plugins/commands.py
+
+# Add this import at the top of the file
+from pyromod.exceptions import ListenerTimeout
 import logging
 
 from pyrogram import filters
@@ -183,6 +187,48 @@ async def myplan_cmd(b, m):
     )
 
     await m.reply_text(text, quote=True)
+
+
+# --- NEW COMMANDS: Footer ---
+@StreamBot.on_message(filters.command("add_footer") & filters.private)
+async def add_footer_cmd(c, m):
+    if not await db.is_user_exist(m.from_user.id):
+        await db.add_user(m.from_user.id)
+        await c.send_message(
+            Var.NEW_USER_LOG,
+            f"**Nᴇᴡ Usᴇʀ Jᴏɪɴᴇᴅ:** \n\n__Mʏ Nᴇᴡ Fʀɪᴇɴᴅ__ [{m.from_user.first_name}](tg://user?id={m.from_user.id}) __Sᴛᴀʀᴛᴇᴅ Yᴏᴜʀ Bᴏᴛ !!__"
+        )
+
+    try:
+        footer_text_msg = await c.ask(
+            chat_id=m.chat.id,
+            text="Okay, send me the text for your footer.\n\nThis will be added to all your generated file links.\n\nUse /cancel to stop.",
+            timeout=60
+        )
+
+        if footer_text_msg.text and not footer_text_msg.text.startswith("/"):
+            await db.set_footer(m.from_user.id, footer_text_msg.text)
+            await m.reply_text("✅ Footer successfully saved.")
+        else:
+            await m.reply_text("Invalid input. Please send text only and do not use commands.")
+
+    except ListenerTimeout:
+        await m.reply_text("⌛️ Request timed out. Please try again.")
+    except Exception as e:
+        await m.reply_text(f"An error occurred: `{e}`")
+
+
+@StreamBot.on_message(filters.command("remove_footer") & filters.private)
+async def remove_footer_cmd(c, m):
+    if not await db.is_user_exist(m.from_user.id):
+        await db.add_user(m.from_user.id)
+        await c.send_message(
+            Var.NEW_USER_LOG,
+            f"**Nᴇᴡ Usᴇʀ Jᴏɪɴᴇᴅ:** \n\n__Mʏ Nᴇᴡ Fʀɪᴇɴᴅ__ [{m.from_user.first_name}](tg://user?id={m.from_user.id}) __Sᴛᴀʀᴛᴇᴅ Yᴏᴜʀ Bᴏᴛ !!__"
+        )
+
+    await db.remove_footer(m.from_user.id)
+    await m.reply_text("✅ Your custom footer has been removed.")
 
 
 @StreamBot.on_message(filters.command('ban') & filters.user(Var.OWNER_ID))
