@@ -92,8 +92,25 @@ async def _run_twitter_process(c: Client, m: Message):
                 continue
 
             if m.from_user.id not in Var.OWNER_ID:
-                # Bandwidth checking logic can be placed here
-                pass
+                await db.check_and_update_tier(m.from_user.id)
+                user_data = await db.get_user_info(m.from_user.id)
+                user_tier = user_data.get('tier', Var.DEFAULT_PLAN)
+                daily_limit_gb = Var.USER_PLANS.get(user_tier, Var.DAILY_LIMIT_GB)
+                limit_in_bytes = daily_limit_gb * 1024 * 1024 * 1024
+
+                today = datetime.date.today().isoformat()
+                if user_data.get("last_reset_date") != today:
+                    await db.reset_daily_usage(m.from_user.id)
+                    user_data['daily_data_used'] = 0
+                
+                if user_data.get("daily_data_used", 0) + file_size > limit_in_bytes:
+                    await m.reply_text(
+                        f"Skipping **{new_filename}**. Downloading this file would exceed your daily limit of **{daily_limit_gb} GB**.\n\n"
+                        f"**File Size:** `{humanbytes(file_size)}`\n"
+                        f"**Your Usage Today:** `{humanbytes(user_data.get('daily_data_used', 0))}`",
+                        quote=True
+                    )
+                    continue
             
             download_path, thumb_path = None, None
             os.makedirs(download_dir, exist_ok=True)
