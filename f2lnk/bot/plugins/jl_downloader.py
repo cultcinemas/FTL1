@@ -1,6 +1,6 @@
 # ===============================================================
 # Generic HTML/JS Downloader Plugin
-# Command: /jl_downloader  or  /jl
+# Command: /jl_downloader or /jl
 # Works with pages containing direct .mp4 or downloadable URLs.
 # Integrates with StreamBot (FTL project).
 # Developer: ASN GADGETS
@@ -16,11 +16,14 @@ import mimetypes
 import requests
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+from typing import Optional
+
 from pyrogram import filters
 from pyrogram.types import Message
 from pyrogram.errors import MessageNotModified
 from pyromod.exceptions import ListenerTimeout
-from f2lnk import StreamBot
+
+from f2lnk.bot import StreamBot
 
 DOWNLOAD_ROOT = "downloads"
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
@@ -44,7 +47,7 @@ def humanbytes(size: int) -> str:
 # Extractor – finds .mp4 or file links in HTML/JS
 # ---------------------------
 
-def extract_media_url(page_url: str) -> str | None:
+def extract_media_url(page_url: str) -> Optional[str]:
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
@@ -56,22 +59,22 @@ def extract_media_url(page_url: str) -> str | None:
 
         html = r.text
 
-        # 1️⃣ <video src="...">
+        # <video src="...">
         m = re.search(r'<video[^>]+src=["\']([^"\']+\.mp4)[^"\']*["\']', html, re.I)
         if m:
             return m.group(1)
 
-        # 2️⃣ "file": "https://...mp4"
+        # "file": "https://...mp4"
         m = re.search(r'"file"\s*:\s*"([^"]+\.mp4[^"]*)"', html)
         if m:
             return m.group(1)
 
-        # 3️⃣ source: "https://...mp4"
+        # source: "https://...mp4"
         m = re.search(r'source\s*:\s*"([^"]+\.mp4[^"]*)"', html)
         if m:
             return m.group(1)
 
-        # 4️⃣ Any direct .mp4 link
+        # Any direct .mp4 link
         m = re.search(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', html)
         if m:
             return m.group(0)
@@ -102,31 +105,30 @@ async def process_jl_task(message: Message, page_url: str):
 
         # HEAD request for size
         total_size = 0
-        async with aiohttp.ClientSession() as sess:
-            async with sess.head(direct_url, allow_redirects=True, timeout=15) as r:
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as sess:
+            async with sess.head(direct_url, allow_redirects=True) as r:
                 total_size = int(r.headers.get("Content-Length", 0))
 
         if total_size > 1.95 * 1024**3:
-            await status.edit(f"⚠️ File too large (`{humanbytes(total_size)}`). Telegram max ≈ 2 GB.")
+            await status.edit(f"⚠️ File too large ({humanbytes(total_size)}). Telegram max ≈ 2 GB.")
             return
 
         # Ask filename and thumbnail
         try:
-            ask_name = await StreamBot.ask(
-                message.chat.id,
+            ask_name = await message.chat.ask(
                 "✏️ Send custom filename (with extension) or `/skip`.",
                 timeout=60,
             )
             fname = ask_name.text.strip() if ask_name.text.lower() != "/skip" else None
 
-            ask_thumb = await StreamBot.ask(
-                message.chat.id,
+            ask_thumb = await message.chat.ask(
                 "📸 Send a thumbnail image or `/skip`.",
                 timeout=60,
             )
             if ask_thumb.photo:
-                thumb_path = await StreamBot.download_media(
-                    ask_thumb.photo, file_name=f"thumb_{message.from_user.id}.jpg"
+                thumb_path = await ask_thumb.download(
+                    file_name=f"thumb_{message.from_user.id}.jpg"
                 )
         except ListenerTimeout:
             await status.edit("⌛ Timeout. Cancelled.")
@@ -139,29 +141,30 @@ async def process_jl_task(message: Message, page_url: str):
         await status.edit(f"⬇️ Downloading **{filename}** ...")
 
         downloaded = 0
-        last = time.time()
+        last_update = time.time()
         async with aiohttp.ClientSession() as sess:
             async with sess.get(direct_url) as r:
                 with open(file_path, "wb") as f:
                     async for chunk in r.content.iter_chunked(1024 * 1024):
                         f.write(chunk)
                         downloaded += len(chunk)
-                        if time.time() - last > 2:
+                        if time.time() - last_update > 2:
                             try:
                                 await status.edit(
                                     f"⬇️ {humanbytes(downloaded)} / {humanbytes(total_size or downloaded)}"
                                 )
                             except MessageNotModified:
                                 pass
-                            last = time.time()
+                            last_update = time.time()
 
         # Upload to Telegram
         await status.edit("📤 Uploading to Telegram...")
 
         async def progress(cur, tot):
-            if time.time() - last > 2:
+            if tot and tot > 0:
+                percent = cur / tot * 100
                 try:
-                    await status.edit(f"📤 {humanbytes(cur)} / {humanbytes(tot)}")
+                    await status.edit(f"📤 Uploading... {percent:.1f}%")
                 except MessageNotModified:
                     pass
 
@@ -188,7 +191,8 @@ async def process_jl_task(message: Message, page_url: str):
         await status.edit(f"❌ Error: `{e}`")
         print(f"[jl_downloader] {e}")
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
         if thumb_path and os.path.exists(thumb_path):
             os.remove(thumb_path)
 
@@ -196,7 +200,7 @@ async def process_jl_task(message: Message, page_url: str):
 # Command
 # ---------------------------
 
-@StreamBot.on_message(filters.command(["jl_downloader", "jl"]) & filters.private)
+@StreamBot.on_message(filters.command(["jl_downloader", "jl"]))
 async def jl_handler(_, m: Message):
     if len(m.command) == 1:
         await m.reply_text(
