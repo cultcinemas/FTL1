@@ -43,29 +43,40 @@ def humanbytes(size: int) -> str:
     return f"{size:.2f} {Dic_powerN[n]}"
 
 # ---------------------------
-# Extractor – finds .mp4 or file links in HTML/JS (ASYNC VERSION)
+# Extractor – finds .mp4 or file links in HTML/JS
 # ---------------------------
 
 async def extract_media_url(page_url: str) -> Optional[str]:
     """
     Async function to extract media URL from a webpage.
-    This prevents blocking the event loop.
+    Uses proper headers like the working xe.py code.
     """
     try:
+        # Proper headers like your working code
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
         }
         
-        timeout = aiohttp.ClientTimeout(total=20)
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            async with session.get(page_url, allow_redirects=True) as response:
+        # Get referer from URL
+        parsed = urlparse(page_url)
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
+        headers["Referer"] = referer
+        
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(page_url, headers=headers, allow_redirects=True) as response:
                 if response.status != 200:
                     print(f"[extract_media_url] HTTP {response.status} for {page_url}")
                     return None
                 
                 html = await response.text()
+        
+        print(f"[extract_media_url] Fetched {len(html)} bytes from {page_url}")
         
         # Pattern 1: <video src="...">
         m = re.search(r'<video[^>]+src=["\']([^"\']+\.mp4[^"\']*)["\']', html, re.I)
@@ -87,16 +98,23 @@ async def extract_media_url(page_url: str) -> Optional[str]:
             url = m.group(1)
             print(f"[extract_media_url] Found via 'source': {url}")
             return url
+        
+        # Pattern 4: "src": "https://...mp4"
+        m = re.search(r'"src"\s*:\s*"([^"]+\.mp4[^"]*)"', html)
+        if m:
+            url = m.group(1)
+            print(f"[extract_media_url] Found via 'src': {url}")
+            return url
 
-        # Pattern 4: Any direct .mp4 link in HTML
+        # Pattern 5: Any direct .mp4 link in HTML
         m = re.search(r'https?://[^\s"\'<>]+\.mp4[^\s"\'<>]*', html)
         if m:
             url = m.group(0)
             print(f"[extract_media_url] Found direct .mp4 link: {url}")
             return url
         
-        # Pattern 5: Look for other video formats
-        m = re.search(r'https?://[^\s"\'<>]+\.(mkv|avi|mov|wmv|flv|webm)[^\s"\'<>]*', html, re.I)
+        # Pattern 6: Look for other video formats
+        m = re.search(r'https?://[^\s"\'<>]+\.(mkv|avi|mov|wmv|flv|webm|m3u8)[^\s"\'<>]*', html, re.I)
         if m:
             url = m.group(0)
             print(f"[extract_media_url] Found video file: {url}")
@@ -110,156 +128,213 @@ async def extract_media_url(page_url: str) -> Optional[str]:
         return None
     except Exception as e:
         print(f"[extract_media_url] Error: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 # ---------------------------
-# Core download + upload logic
+# Core download + upload logic (based on xe.py pattern)
 # ---------------------------
 
 async def process_jl_task(client: Client, message: Message, page_url: str):
-    status = await message.reply_text("🔍 Extracting link...", quote=True)
+    status_msg = None
     temp_dir = os.path.join(DOWNLOAD_ROOT, f"{message.from_user.id}_{int(time.time())}")
-    os.makedirs(temp_dir, exist_ok=True)
     thumb_path = None
     file_path = None
 
     try:
-        # Extract media URL (now async)
+        # ---------- 1. Extract direct URL ----------
+        status_msg = await message.reply_text("**🔍 Extracting video URL...**", quote=True)
+        
         direct_url = await extract_media_url(page_url)
         
         if not direct_url:
-            await status.edit("❌ No direct video/file link found on that page.\n\nMake sure the URL contains a playable video.")
+            await status_msg.edit(
+                "**❌ Failed to extract video URL.**\n\n"
+                "**Possible reasons:**\n"
+                "• No direct video link found on page\n"
+                "• Site requires login/cookies\n"
+                "• Video is DRM protected\n"
+                "• JavaScript-rendered content"
+            )
             return
 
-        # Make URL absolute if it's relative
+        # Make URL absolute if relative
         if direct_url.startswith("//"):
             direct_url = "https:" + direct_url
         elif direct_url.startswith("/"):
             parsed = urlparse(page_url)
             direct_url = f"{parsed.scheme}://{parsed.netloc}{direct_url}"
 
-        await status.edit(f"✅ Found link:\n`{direct_url[:80]}...`\n\n⏳ Checking file size...")
+        await status_msg.edit(f"**✅ Found video!**\n`{direct_url[:70]}...`\n\n**⏳ Checking size...**")
 
-        # HEAD request for size
+        # ---------- 2. HEAD request – get size ----------
         total_size = 0
+        
+        # Use proper headers for HEAD request too
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": page_url,
+            "Accept": "*/*",
+        }
+        
         timeout = aiohttp.ClientTimeout(total=15)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as sess:
-                async with sess.head(direct_url, allow_redirects=True) as r:
-                    total_size = int(r.headers.get("Content-Length", 0))
+            async with aiohttp.ClientSession(timeout=timeout, headers=headers) as sess:
+                async with sess.head(direct_url, allow_redirects=True) as resp:
+                    if resp.status != 200:
+                        print(f"[HEAD] HTTP {resp.status} for {direct_url}")
+                        # Don't fail, just continue without size
+                    else:
+                        total_size = int(resp.headers.get("Content-Length", 0))
         except Exception as e:
             print(f"[HEAD request error] {e}")
-            # Continue anyway, we'll handle unknown size during download
+            # Continue anyway
 
-        if total_size > 1.95 * 1024**3:
-            await status.edit(f"⚠️ File too large ({humanbytes(total_size)}). Telegram max ≈ 2 GB.")
-            return
+        if total_size == 0:
+            await status_msg.edit("**⚠️ Could not determine file size – will download anyway.**")
+        else:
+            # Telegram limit check
+            if total_size > 1.95 * 1024**3:
+                await status_msg.edit(
+                    f"**❌ File too large:** `{humanbytes(total_size)}`\n"
+                    "Telegram only allows **≤ 1.95 GB**."
+                )
+                return
 
         size_info = humanbytes(total_size) if total_size > 0 else "Unknown size"
-        await status.edit(f"📊 File size: {size_info}\n\n⏳ Waiting for filename...")
+        await status_msg.edit(f"**📊 File size:** `{size_info}`\n\n**⏳ Waiting for filename...**")
 
-        # Ask filename and thumbnail
+        # ---------- 3. Ask for filename & thumbnail ----------
         try:
             ask_name = await message.chat.ask(
-                "✏️ Send custom filename (with extension) or type `/skip`:",
-                timeout=60,
+                f"**🔗 URL:** `{page_url}`\n"
+                f"**📦 Size:** `{size_info}`\n\n"
+                "Send **filename** (with extension) or `/skip` to use original:",
+                timeout=90
             )
-            fname = ask_name.text.strip() if ask_name.text and ask_name.text.lower() != "/skip" else None
+            custom_name = ask_name.text.strip() if ask_name.text and ask_name.text.lower() != "/skip" else None
 
             ask_thumb = await message.chat.ask(
-                "📸 Send a thumbnail image or type `/skip`:",
-                timeout=60,
+                "**📸 Send a thumbnail** (photo) or `/skip` for none:",
+                timeout=60
             )
             if ask_thumb.photo:
                 thumb_path = await ask_thumb.download(
                     file_name=os.path.join(temp_dir, f"thumb_{message.from_user.id}.jpg")
                 )
         except ListenerTimeout:
-            await status.edit("⌛ Timeout. Cancelled.")
+            await status_msg.edit("**⌛ Timeout – aborting.**")
             return
 
+        # ---------- 4. Download ----------
+        os.makedirs(temp_dir, exist_ok=True)
+        
         # Determine filename
-        filename = fname or os.path.basename(urlparse(direct_url).path)
+        filename = custom_name or (os.path.basename(urlparse(direct_url).path) or "video.mp4")
         if not filename or filename == "" or "." not in filename:
-            # Extract extension from URL or default to mp4
             ext = os.path.splitext(urlparse(direct_url).path)[1] or ".mp4"
             filename = f"downloaded_file{ext}"
         filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
         file_path = os.path.join(temp_dir, filename)
 
-        await status.edit(f"⬇️ Downloading **{filename}**...")
+        await status_msg.edit("**⬇️ Starting download...**")
 
-        # Download file
         downloaded = 0
         last_update = time.time()
-        
-        timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=30)
-        async with aiohttp.ClientSession(timeout=timeout) as sess:
-            async with sess.get(direct_url, allow_redirects=True) as r:
-                if r.status != 200:
-                    await status.edit(f"❌ Failed to download: HTTP {r.status}")
+
+        # Download with proper headers (like xe.py)
+        download_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Referer": page_url,
+            "Accept": "*/*",
+            "Accept-Encoding": "gzip, deflate",
+        }
+
+        timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=60)
+        async with aiohttp.ClientSession(timeout=timeout, headers=download_headers) as sess:
+            async with sess.get(direct_url, allow_redirects=True) as resp:
+                if resp.status != 200:
+                    await status_msg.edit(f"**❌ Download failed – HTTP {resp.status}**")
                     return
                 
                 with open(file_path, "wb") as f:
-                    async for chunk in r.content.iter_chunked(1024 * 1024):  # 1MB chunks
+                    async for chunk in resp.content.iter_chunked(1024 * 1024):  # 1 MiB chunks
                         f.write(chunk)
                         downloaded += len(chunk)
                         
-                        # Update progress every 2 seconds
-                        if time.time() - last_update > 2:
+                        now = time.time()
+                        if now - last_update > 2:
                             try:
-                                progress_text = f"⬇️ Downloaded: {humanbytes(downloaded)}"
+                                progress_text = f"**⬇️ Downloading...**\n`{filename}`\n"
+                                progress_text += f"`{humanbytes(downloaded)}`"
                                 if total_size > 0:
                                     percent = (downloaded / total_size) * 100
-                                    progress_text += f" / {humanbytes(total_size)} ({percent:.1f}%)"
-                                await status.edit(progress_text)
+                                    progress_text += f" / `{humanbytes(total_size)}` ({percent:.1f}%)"
+                                await status_msg.edit(progress_text)
                             except MessageNotModified:
                                 pass
-                            last_update = time.time()
+                            last_update = now
+                        
+                        await asyncio.sleep(0)  # Allow cancellation
 
-        await status.edit("📤 Uploading to Telegram...")
+        # ---------- 5. Upload to Telegram ----------
+        await status_msg.edit("**📤 Download complete! Uploading to Telegram...**")
+        last_update = time.time()
 
-        # Progress callback for upload
-        async def progress(cur, tot):
-            if tot and tot > 0:
-                percent = cur / tot * 100
+        async def up_progress(cur, tot):
+            nonlocal last_update
+            now = time.time()
+            if now - last_update > 2:
                 try:
-                    await status.edit(f"📤 Uploading... {percent:.1f}%\n{humanbytes(cur)} / {humanbytes(tot)}")
+                    percent = (cur / tot) * 100 if tot > 0 else 0
+                    await status_msg.edit(
+                        f"**📤 Uploading...**\n"
+                        f"`{filename}`\n"
+                        f"`{humanbytes(cur)}` / `{humanbytes(tot)}` ({percent:.1f}%)"
+                    )
                 except MessageNotModified:
                     pass
+                last_update = now
+            await asyncio.sleep(0)
 
-        # Determine MIME type and send
-        mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+        # Detect MIME type and send
+        mime = mimetypes.guess_type(file_path)[0] or "video/mp4"
+        file_size = os.path.getsize(file_path)
         
         if mime.startswith("video"):
             await client.send_video(
                 chat_id=message.chat.id,
                 video=file_path,
                 thumb=thumb_path,
-                caption=f"**{filename}**\n\n📦 Size: {humanbytes(os.path.getsize(file_path))}",
-                progress=progress,
+                caption=f"**📹 {filename}**\n\n**📦 Size:** `{humanbytes(file_size)}`",
+                progress=up_progress
             )
         else:
             await client.send_document(
                 chat_id=message.chat.id,
                 document=file_path,
                 thumb=thumb_path,
-                caption=f"**{filename}**\n\n📦 Size: {humanbytes(os.path.getsize(file_path))}",
-                progress=progress,
+                caption=f"**📄 {filename}**\n\n**📦 Size:** `{humanbytes(file_size)}`",
+                progress=up_progress
             )
 
-        await status.delete()
+        await status_msg.delete()
 
+    except asyncio.CancelledError:
+        if status_msg:
+            await status_msg.edit("**❌ Task cancelled by user.**")
     except Exception as e:
         error_msg = str(e)
-        await status.edit(f"❌ Error: `{error_msg[:200]}`")
+        if status_msg:
+            await status_msg.edit(f"**❌ Error:** `{error_msg[:200]}`")
         print(f"[jl_downloader] Exception: {e}")
         import traceback
         traceback.print_exc()
         
     finally:
         # Cleanup
-        if os.path.exists(temp_dir):
+        if os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
         if thumb_path and os.path.exists(thumb_path) and not thumb_path.startswith(temp_dir):
             try:
@@ -277,18 +352,22 @@ async def jl_handler(client: Client, m: Message):
     
     if len(m.command) == 1:
         await m.reply_text(
-            "**JL Downloader Usage:**\n\n"
+            "**🎬 JL Downloader Usage:**\n\n"
             "`/jl <page_url>`\n\n"
             "**Example:**\n"
             "`/jl https://example.com/video123`\n\n"
-            "**Supported:** Pages with embedded .mp4, .mkv, .avi, .mov, etc."
+            "**✅ Supported:**\n"
+            "• Pages with embedded videos (.mp4, .mkv, etc.)\n"
+            "• Direct video links\n"
+            "• Most video hosting sites\n\n"
+            "**⚠️ Max file size:** 1.95 GB (Telegram limit)"
         )
         return
 
     url = m.command[1].strip()
     
     if not url.startswith("http"):
-        await m.reply_text("❌ Please send a valid URL starting with http:// or https://")
+        await m.reply_text("**❌ Please send a valid URL** starting with http:// or https://")
         return
 
     await process_jl_task(client, m, url)
