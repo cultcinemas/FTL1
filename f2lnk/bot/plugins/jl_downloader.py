@@ -98,12 +98,11 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
         print(f"[Extractor] An error occurred: {e}")
         return None
 
-# --- NEW: Robust HLS Downloader with Headers ---
+# --- Robust HLS Downloader with Headers ---
 async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message, headers: dict):
     """Downloads HLS stream using ffmpeg, passing browser headers for compatibility."""
     await status_msg.edit("**⬇️ Downloading HLS stream...**\n(This uses FFmpeg and may take some time. Progress is not shown.)")
     
-    # Format headers for FFmpeg's -headers argument
     header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
     
     process = await asyncio.create_subprocess_exec(
@@ -132,8 +131,8 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
     temp_dir = os.path.join(DOWNLOAD_ROOT, f"{message.from_user.id}_{int(time.time())}")
     os.makedirs(temp_dir, exist_ok=True)
     thumb_path = None
+    file_path = None
 
-    # Define standard browser headers to be used for all requests
     browser_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Referer": page_url
@@ -155,9 +154,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
                 await status_msg.edit("**❌ Failed to find a downloadable video.**\nThe site might be protected, or the video requires a login.")
                 return
 
-        # Resolve relative URLs (e.g., "/videos/vid.mp4") into absolute ones
         direct_url = urljoin(page_url, direct_url)
-
         await status_msg.edit(f"**✅ Video found!**\n`{direct_url[:70]}...`\n\n**⏳ Checking details...**")
 
         # ---------- 2. Get details and ask for filename ----------
@@ -175,17 +172,15 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
                 print(f"[HEAD Request Error] {e}")
 
         size_info = humanbytes(total_size) if total_size > 0 else "Unknown (HLS Stream)"
-        
         if total_size > 1.95 * 1024**3:
             await status_msg.edit(f"**❌ File too large:** `{humanbytes(total_size)}`\nTelegram's limit is **1.95 GB**.")
             return
 
         # ---------- 3. Ask for filename & thumbnail ----------
         try:
-            default_filename = unquote(os.path.basename(urlparse(direct_url).path))
+            default_filename = unquote(os.path.basename(urlparse(direct_url).path)) or "video.mp4"
             if is_hls: default_filename = os.path.splitext(default_filename)[0] + ".mp4"
-            if not default_filename: default_filename = "video.mp4"
-
+            
             ask_name = await message.chat.ask(f"**📦 Size:** `{size_info}`\n\nSend a **filename** or /skip to use default:\n`{default_filename}`", timeout=90)
             custom_name = ask_name.text.strip() if ask_name.text and ask_name.text.lower() != "/skip" else None
 
@@ -214,8 +209,13 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
                         await status_msg.edit(f"**❌ Download failed – HTTP {resp.status}**\nThe link may be expired or invalid.")
                         return
                     
+                    # --- FIXED UPLOAD ERROR ---
+                    # This is the corrected, robust way to write the file.
                     with open(file_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(1024 * 1024):
+                        while True:
+                            chunk = await resp.content.read(1024 * 1024) # Read 1MB at a time
+                            if not chunk:
+                                break
                             f.write(chunk)
                             downloaded += len(chunk)
                             now = time.time()
@@ -225,6 +225,9 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
                                 try: await status_msg.edit(progress)
                                 except MessageNotModified: pass
                                 last_update = now
+        
+        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+            raise Exception("Download finished, but the output file is missing or empty.")
 
         # ---------- 5. Upload to Telegram ----------
         await status_msg.edit("**📤 Download complete! Uploading...**")
