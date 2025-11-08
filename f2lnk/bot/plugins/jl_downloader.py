@@ -16,6 +16,7 @@ import mimetypes
 import subprocess
 from urllib.parse import urlparse, unquote
 from typing import Optional
+from bs4 import BeautifulSoup
 
 from pyrogram import filters, Client
 from pyrogram.types import Message
@@ -47,27 +48,19 @@ def humanbytes(size: int) -> str:
     return f"{size:.2f} {Dic_powerN[n]}"
 
 # ---------------------------
-# Extractor – finds .mp4 or file links in HTML/JS
+# Extractor – finds media links in HTML/JS
 # ---------------------------
 
 async def extract_media_url(page_url: str) -> Optional[str]:
     """
-    Async function to extract media URL from a webpage.
-    Uses proper headers like the working xe.py code.
+    Async function to extract media URL from a webpage by parsing HTML and using regex.
     """
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
-            "Accept-Encoding": "gzip, deflate",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
         }
-        
-        parsed = urlparse(page_url)
-        referer = f"{parsed.scheme}://{parsed.netloc}/"
-        headers["Referer"] = referer
         
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -77,44 +70,50 @@ async def extract_media_url(page_url: str) -> Optional[str]:
                     return None
                 
                 html = await response.text()
-        
-        print(f"[extract_media_url] Fetched {len(html)} bytes from {page_url}")
-        
-        # Pattern for various video links including m3u8
-        patterns = [
-            r'<video[^>]+src=["\']([^"\']+\.(?:mp4|mkv|avi|mov|wmv|flv|webm|m3u8)[^"\']*)["\']',
-            r'"file"\s*:\s*"([^"]+\.(?:mp4|mkv|avi|mov|wmv|flv|webm|m3u8)[^"]*)"',
-            r'source\s*:\s*["\']([^"\']+\.(?:mp4|mkv|avi|mov|wmv|flv|webm|m3u8)[^"\']*)["\']',
-            r'"src"\s*:\s*"([^"]+\.(?:mp4|mkv|avi|mov|wmv|flv|webm|m3u8)[^"]*)"',
-            r'https?://[^\s"\'<>]+\.(?:mp4|mkv|avi|mov|wmv|flv|webm|m3u8)[^\s"\'<>]*'
-        ]
 
-        for pattern in patterns:
-            m = re.search(pattern, html, re.I)
-            if m:
-                url = m.group(1)
-                print(f"[extract_media_url] Found URL: {url}")
+        # Method 1: Use BeautifulSoup to parse the HTML for <video> tags
+        soup = BeautifulSoup(html, "html.parser")
+        video_tag = soup.find("video")
+        if video_tag:
+            # Prefer a <source> tag within the <video> tag
+            source_tag = video_tag.find("source")
+            if source_tag and source_tag.get("src"):
+                url = source_tag["src"]
+                print(f"[extract_media_url] Found via BeautifulSoup <source src>: {url}")
+                return url
+            # Fallback to the <video> tag's own src attribute
+            if video_tag.get("src"):
+                url = video_tag["src"]
+                print(f"[extract_media_url] Found via BeautifulSoup <video src>: {url}")
                 return url
 
-        print(f"[extract_media_url] No media URL found in page")
+        # Method 2: Fallback to regex on the entire page content (good for URLs in JavaScript)
+        patterns = [
+            r'source\s*:\s*["\']([^"\']+\.(?:mp4|mkv|m3u8)[^"\']*)["\']',
+            r'"file"\s*:\s*"([^"]+\.(?:mp4|mkv|m3u8)[^"]*)"',
+            r'"src"\s*:\s*"([^"]+\.(?:mp4|mkv|m3u8)[^"]*)"',
+            r'https?://[^\s"\'<>]+\.(?:mp4|mkv|webm|m3u8)[^\s"\'<>]*'
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, html, re.I)
+            if match:
+                url = match.group(1)
+                print(f"[extract_media_url] Found via Regex: {url}")
+                return url
+
+        print(f"[extract_media_url] No media URL found using BeautifulSoup or Regex on {page_url}")
         return None
         
-    except asyncio.TimeoutError:
-        print(f"[extract_media_url] Timeout while fetching {page_url}")
-        return None
     except Exception as e:
-        print(f"[extract_media_url] Error: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"[extract_media_url] An error occurred during extraction: {e}")
         return None
 
-
-# --- NEW: FFmpeg Downloader for HLS streams ---
+# --- FFmpeg Downloader for HLS streams ---
 async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message):
     """Downloads HLS stream using ffmpeg."""
     await status_msg.edit("**⬇️ Downloading HLS stream with FFmpeg...** (This may take a while and progress is not shown)")
     process = await asyncio.create_subprocess_exec(
-        'ffmpeg', '-i', stream_url, '-c', 'copy', file_path,
+        'ffmpeg', '-y', '-i', stream_url, '-c', 'copy', file_path,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
@@ -124,13 +123,12 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
     if process.returncode != 0:
         error_message = stderr.decode().strip()
         print(f"FFmpeg error: {error_message}")
-        raise Exception(f"FFmpeg failed to download stream. Error: {error_message.splitlines()[-1]}")
+        raise Exception(f"FFmpeg failed. Error: {error_message.splitlines()[-1]}")
     
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         raise Exception("FFmpeg finished but the output file is missing or empty.")
 
     return file_path
-
 
 # ---------------------------
 # Core download + upload logic
@@ -144,44 +142,44 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
     try:
         # ---------- 1. Extract URL ----------
-        parsed_url = urlparse(page_url)
-        file_ext = os.path.splitext(parsed_url.path)[1].lower()
+        parsed_page_url = urlparse(page_url)
+        file_ext = os.path.splitext(parsed_page_url.path)[1].lower()
         
         is_direct_link = file_ext in ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m3u8']
 
         if is_direct_link:
-            status_msg = await message.reply_text("**🎥 Direct video link detected!**", quote=True)
+            status_msg = await message.reply_text("**🎥 Direct media link detected!**", quote=True)
             direct_url = page_url
         else:
-            status_msg = await message.reply_text("**🔍 Extracting video URL...**", quote=True)
+            status_msg = await message.reply_text("**🔍 Scraping website for video URL...**", quote=True)
             direct_url = await extract_media_url(page_url)
             if not direct_url:
                 await status_msg.edit(
                     "**❌ Failed to extract video URL.**\n\n"
-                    "**Possible reasons:**\n"
-                    "• No direct video link found on page\n"
-                    "• Site requires login/cookies or is DRM protected\n"
-                    "• Content is rendered by JavaScript\n\n"
-                    "**💡 Tip:** Try finding a direct video URL ending with .mp4, .mkv, .m3u8 etc."
+                    "This can happen if:\n"
+                    "• No downloadable video was found on the page.\n"
+                    "• The site uses advanced protection (DRM).\n"
+                    "• The video requires a login.\n\n"
+                    "**💡 Tip:** Try finding a more direct link if possible."
                 )
                 return
 
+        # Make URL absolute if it's relative
         if direct_url.startswith("//"):
             direct_url = "https:" + direct_url
         elif direct_url.startswith("/"):
-            parsed = urlparse(page_url)
-            direct_url = f"{parsed.scheme}://{parsed.netloc}{direct_url}"
+            direct_url = f"{parsed_page_url.scheme}://{parsed_page_url.netloc}{direct_url}"
 
         print(f"[DEBUG] Final URL to process: {direct_url}")
-        await status_msg.edit(f"**✅ Found video!**\n`{direct_url[:70]}...`\n\n**⏳ Checking details...**")
+        await status_msg.edit(f"**✅ Video found!**\n`{direct_url[:70]}...`\n\n**⏳ Checking details...**")
 
         # ---------- 2. Get details and ask for filename ----------
         total_size = 0
-        is_hls = direct_url.endswith('.m3u8')
+        is_hls = '.m3u8' in direct_url
 
         if not is_hls:
             try:
-                headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": page_url}
+                headers = {"User-Agent": "Mozilla/5.0", "Referer": page_url}
                 timeout = aiohttp.ClientTimeout(total=15)
                 async with aiohttp.ClientSession(timeout=timeout, headers=headers) as sess:
                     async with sess.head(direct_url, allow_redirects=True) as resp:
@@ -222,17 +220,16 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         if is_hls:
             file_path = await download_hls_stream(direct_url, file_path, status_msg)
-            total_size = os.path.getsize(file_path) # Get size after download
         else:
             await status_msg.edit("**⬇️ Starting download...**")
             downloaded = 0
             last_update = time.time()
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36", "Referer": page_url}
+            headers = {"User-Agent": "Mozilla/5.0", "Referer": page_url}
             timeout = aiohttp.ClientTimeout(total=None)
             async with aiohttp.ClientSession(timeout=timeout, headers=headers) as sess:
                 async with sess.get(direct_url, allow_redirects=True) as resp:
                     if resp.status != 200:
-                        await status_msg.edit(f"**❌ Download failed – HTTP {resp.status}**\n\nThis can happen if the link is temporary, protected, or invalid.")
+                        await status_msg.edit(f"**❌ Download failed – HTTP {resp.status}**\nThis can happen if the link is temporary, protected, or invalid.")
                         return
                     
                     with open(file_path, "wb") as f:
@@ -253,8 +250,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         # ---------- 5. Upload to Telegram ----------
         await status_msg.edit("**📤 Download complete! Uploading to Telegram...**")
-        last_update = time.time()
-
+        
         async def up_progress(cur, tot):
             nonlocal last_update
             now = time.time()
@@ -266,7 +262,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
                     pass
                 last_update = now
 
-        # --- NEW: Fetch footer and create custom caption ---
         user_info = await db.get_user_info(message.from_user.id)
         footer = user_info.get("footer", "")
         file_size_display = humanbytes(os.path.getsize(file_path))
@@ -294,7 +289,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         traceback.print_exc()
         
     finally:
-        # Cleanup
         if os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -303,19 +297,17 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 # ---------------------------
 @StreamBot.on_message(filters.command(["jl_downloader", "jl"]) & filters.private)
 async def jl_handler(client: Client, m: Message):
-    """Handler for /jl_downloader and /jl commands"""
-    if len(m.command) == 1:
+    if len(m.command) < 2 and not m.reply_to_message:
         await m.reply_text(
-            "**🎬 JL Downloader Usage:**\n\n`/jl <page_url>`\n\n"
-            "**Example:**\n`/jl https://example.com/video123`\n\n"
-            "**✅ Supported:**\n"
-            "• Pages with embedded videos (.mp4, .mkv, .m3u8, etc.)\n"
-            "• Direct video & HLS stream links\n\n"
+            "**🎬 JL Website Downloader**\n\n"
+            "This command scrapes a website URL to find and download embedded videos.\n\n"
+            "**Usage:**\n`/jl <website_url>`\n\n"
+            "**Example:**\n`/jl https://example.com/page-with-a-video`\n\n"
             "**⚠️ Max file size:** 1.95 GB (Telegram limit)"
         )
         return
 
-    url = m.command[1].strip()
+    url = m.command[1].strip() if len(m.command) > 1 else m.reply_to_message.text.strip()
     if not url.startswith(("http://", "https://")):
         await m.reply_text("**❌ Please send a valid URL** starting with http:// or https://")
         return
