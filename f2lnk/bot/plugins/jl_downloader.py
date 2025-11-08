@@ -175,6 +175,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
             
             # --- THE DEFINITIVE FIX FOR 'NoneType' ERROR ---
             # This logic now correctly mirrors the working `xe.py` example.
+            last_update = time.time()
             async with aiohttp.ClientSession() as session:
                 async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
                     if resp.status != 200:
@@ -182,7 +183,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
                         return
 
                     downloaded = 0
-                    last_update = time.time()
                     with open(file_path, "wb") as f:
                         async for chunk in resp.content.iter_chunked(1024 * 1024): # 1MB Chunks
                             f.write(chunk)
@@ -201,20 +201,39 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         await status_msg.edit("**📤 Download complete! Uploading...**")
         
+        # FIX: Initialize last_update in the outer scope before the progress function
+        last_update = time.time()
+        
         async def up_progress(cur, tot):
             nonlocal last_update
             now = time.time()
             if now - last_update > 3:
-                try: await status_msg.edit(f"**📤 Uploading...** `{humanbytes(cur)}` / `{humanbytes(tot)}`")
-                except MessageNotModified: pass
+                try: 
+                    await status_msg.edit(f"**📤 Uploading...** `{humanbytes(cur)}` / `{humanbytes(tot)}`")
+                except MessageNotModified: 
+                    pass
+                except Exception:
+                    pass
                 last_update = now
 
         user_info = await db.get_user_info(message.from_user.id)
         footer = user_info.get("footer", "")
         caption = f"**{filename}**" + (f"\n\n{footer}" if footer else "")
         
-        await client.send_video(message.chat.id, video=file_path, thumb=thumb_path, caption=caption, progress=up_progress)
-        await status_msg.delete()
+        # FIX: Send video with proper error handling
+        try:
+            await client.send_video(
+                chat_id=message.chat.id,
+                video=file_path,
+                thumb=thumb_path,
+                caption=caption,
+                progress=up_progress,
+                supports_streaming=True
+            )
+            await status_msg.delete()
+        except Exception as upload_error:
+            await status_msg.edit(f"**❌ Upload failed:** `{str(upload_error)}`")
+            raise
 
     except Exception as e:
         if status_msg: await status_msg.edit(f"**❌ An error occurred:** `{e}`")
