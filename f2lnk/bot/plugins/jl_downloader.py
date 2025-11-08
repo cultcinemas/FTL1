@@ -143,21 +143,33 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
     file_path = None
 
     try:
-        # ---------- 1. Extract direct URL ----------
-        status_msg = await message.reply_text("**🔍 Extracting video URL...**", quote=True)
+        # ---------- 1. Check if it's already a direct video URL ----------
+        parsed_url = urlparse(page_url)
+        file_ext = os.path.splitext(parsed_url.path)[1].lower()
         
-        direct_url = await extract_media_url(page_url)
-        
-        if not direct_url:
-            await status_msg.edit(
-                "**❌ Failed to extract video URL.**\n\n"
-                "**Possible reasons:**\n"
-                "• No direct video link found on page\n"
-                "• Site requires login/cookies\n"
-                "• Video is DRM protected\n"
-                "• JavaScript-rendered content"
-            )
-            return
+        # If URL ends with video extension, treat as direct link
+        if file_ext in ['.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m3u8']:
+            print(f"[DEBUG] Direct video URL detected: {page_url}")
+            status_msg = await message.reply_text("**🎥 Direct video link detected!**", quote=True)
+            direct_url = page_url
+        else:
+            # ---------- Extract from webpage ----------
+            status_msg = await message.reply_text("**🔍 Extracting video URL...**", quote=True)
+            
+            direct_url = await extract_media_url(page_url)
+            
+            if not direct_url:
+                await status_msg.edit(
+                    "**❌ Failed to extract video URL.**\n\n"
+                    "**Possible reasons:**\n"
+                    "• No direct video link found on page\n"
+                    "• Site requires login/cookies\n"
+                    "• Video is DRM protected\n"
+                    "• JavaScript-rendered content\n\n"
+                    "**💡 Tip:** Try using a direct video URL instead\n"
+                    "Example: `/jl https://example.com/video.mp4`"
+                )
+                return
 
         # Make URL absolute if relative
         if direct_url.startswith("//"):
@@ -166,6 +178,9 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
             parsed = urlparse(page_url)
             direct_url = f"{parsed.scheme}://{parsed.netloc}{direct_url}"
 
+        # Log the full URL for debugging
+        print(f"[DEBUG] Extracted URL: {direct_url}")
+        
         await status_msg.edit(f"**✅ Found video!**\n`{direct_url[:70]}...`\n\n**⏳ Checking size...**")
 
         # ---------- 2. HEAD request – get size ----------
@@ -254,8 +269,18 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         timeout = aiohttp.ClientTimeout(total=None, connect=30, sock_read=60)
         async with aiohttp.ClientSession(timeout=timeout, headers=download_headers) as sess:
             async with sess.get(direct_url, allow_redirects=True) as resp:
+                print(f"[DEBUG] Download response status: {resp.status}")
+                print(f"[DEBUG] Response headers: {dict(resp.headers)}")
+                
                 if resp.status != 200:
-                    await status_msg.edit(f"**❌ Download failed – HTTP {resp.status}**")
+                    error_detail = f"**❌ Download failed – HTTP {resp.status}**\n\n"
+                    error_detail += f"**URL tried:** `{direct_url}`\n\n"
+                    error_detail += "**Possible issues:**\n"
+                    error_detail += "• URL requires authentication\n"
+                    error_detail += "• URL has expired\n"
+                    error_detail += "• Site blocks automated downloads\n"
+                    error_detail += "• Try sending a direct video URL instead"
+                    await status_msg.edit(error_detail)
                     return
                 
                 with open(file_path, "wb") as f:
