@@ -13,7 +13,8 @@ import shutil
 import aiohttp
 import asyncio
 import mimetypes
-from urllib.parse import urlparse
+import subprocess
+from urllib.parse import urlparse, unquote
 from typing import Optional
 
 from pyrogram import filters, Client
