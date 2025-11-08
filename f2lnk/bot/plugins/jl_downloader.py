@@ -15,7 +15,6 @@ import asyncio
 import mimetypes
 import requests
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
 from typing import Optional
 
 from pyrogram import filters, Client
