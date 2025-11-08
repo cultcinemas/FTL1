@@ -18,11 +18,12 @@ from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 from typing import Optional
 
-from pyrogram import filters
+from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import MessageNotModified
 from pyromod.exceptions import ListenerTimeout
 
+# Import your bot instance - adjust the import path as needed
 from f2lnk.bot import StreamBot
 
 DOWNLOAD_ROOT = "downloads"
@@ -88,7 +89,7 @@ def extract_media_url(page_url: str) -> Optional[str]:
 # Core download + upload logic
 # ---------------------------
 
-async def process_jl_task(message: Message, page_url: str):
+async def process_jl_task(client: Client, message: Message, page_url: str):
     status = await message.reply_text("🔍 Extracting link...", quote=True)
     temp_dir = os.path.join(DOWNLOAD_ROOT, f"{message.from_user.id}_{int(time.time())}")
     os.makedirs(temp_dir, exist_ok=True)
@@ -120,7 +121,7 @@ async def process_jl_task(message: Message, page_url: str):
                 "✏️ Send custom filename (with extension) or `/skip`.",
                 timeout=60,
             )
-            fname = ask_name.text.strip() if ask_name.text.lower() != "/skip" else None
+            fname = ask_name.text.strip() if ask_name.text and ask_name.text.lower() != "/skip" else None
 
             ask_thumb = await message.chat.ask(
                 "📸 Send a thumbnail image or `/skip`.",
@@ -128,13 +129,15 @@ async def process_jl_task(message: Message, page_url: str):
             )
             if ask_thumb.photo:
                 thumb_path = await ask_thumb.download(
-                    file_name=f"thumb_{message.from_user.id}.jpg"
+                    file_name=os.path.join(temp_dir, f"thumb_{message.from_user.id}.jpg")
                 )
         except ListenerTimeout:
             await status.edit("⌛ Timeout. Cancelled.")
             return
 
         filename = fname or os.path.basename(urlparse(direct_url).path)
+        if not filename or filename == "":
+            filename = "downloaded_file.mp4"
         filename = re.sub(r'[<>:"/\\|?*]', "_", filename)
         file_path = os.path.join(temp_dir, filename)
 
@@ -170,7 +173,7 @@ async def process_jl_task(message: Message, page_url: str):
 
         mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
         if mime.startswith("video"):
-            await StreamBot.send_video(
+            await client.send_video(
                 chat_id=message.chat.id,
                 video=file_path,
                 thumb=thumb_path,
@@ -178,7 +181,7 @@ async def process_jl_task(message: Message, page_url: str):
                 progress=progress,
             )
         else:
-            await StreamBot.send_document(
+            await client.send_document(
                 chat_id=message.chat.id,
                 document=file_path,
                 caption=f"**{filename}**",
@@ -193,7 +196,7 @@ async def process_jl_task(message: Message, page_url: str):
     finally:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
-        if thumb_path and os.path.exists(thumb_path):
+        if thumb_path and os.path.exists(thumb_path) and not thumb_path.startswith(temp_dir):
             os.remove(thumb_path)
 
 # ---------------------------
@@ -201,7 +204,7 @@ async def process_jl_task(message: Message, page_url: str):
 # ---------------------------
 
 @StreamBot.on_message(filters.command(["jl_downloader", "jl"]))
-async def jl_handler(_, m: Message):
+async def jl_handler(client: Client, m: Message):
     if len(m.command) == 1:
         await m.reply_text(
             "Usage:\n`/jl_downloader <page_url>`\n\nExample:\n`/jl https://example.com/video123`"
@@ -213,4 +216,4 @@ async def jl_handler(_, m: Message):
         await m.reply_text("❌ Please send a valid URL.")
         return
 
-    await process_jl_task(m, url)
+    await process_jl_task(client, m, url)
