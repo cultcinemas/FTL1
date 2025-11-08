@@ -37,9 +37,9 @@ async def _start_upload_process(c: Client, m: Message):
     
     try:
         if m.reply_to_message and m.reply_to_message.text:
-            url = m.reply_to_message.text
+            url = m.reply_to_message.text.strip()
         elif len(m.command) > 1:
-            url = m.command[1]
+            url = m.command[1].strip()
         else:
             # This case is handled by the launcher, but as a safeguard:
             await m.reply_text("<b>Usage:</b> /upload <direct_file_link> or reply to a link.")
@@ -99,14 +99,18 @@ async def _start_upload_process(c: Client, m: Message):
 
         # --- Interactive Conversation ---
         try:
+            default_filename = os.path.basename(urlparse(url).path) or f"Untitled_{int(time.time())}"
             ask_filename = await c.ask(
                 chat_id=m.chat.id,
-                text=f"**URL:** `{url}`\n**File Size:** `{humanbytes(total_size)}`\n\nPlease send the desired filename, including extension (e.g., `My Video.mp4`).\n\nSend /skip to use original filename.",
+                text=f"**URL:** `{url}`\n**File Size:** `{humanbytes(total_size)}`\n\nPlease send the desired filename, including extension (e.g., `My Video.mp4`).\n\nSend /skip to use default:\n`{default_filename}`",
                 timeout=60
             )
             new_filename = None
             if ask_filename.text and ask_filename.text.lower() != "/skip":
                 new_filename = ask_filename.text
+            else:
+                new_filename = default_filename
+
 
             ask_thumb = await c.ask(
                 chat_id=m.chat.id,
@@ -114,7 +118,9 @@ async def _start_upload_process(c: Client, m: Message):
                 timeout=60
             )
             if ask_thumb.photo:
-                thumb_path = await c.download_media(ask_thumb, file_name=f"thumb_{m.from_user.id}.jpg")
+                os.makedirs(file_path, exist_ok=True)
+                thumb_path = await c.download_media(ask_thumb, file_name=os.path.join(file_path, f"thumb_{m.from_user.id}.jpg"))
+
 
         except ListenerTimeout:
             await status_msg.edit("Request timed out. Please start over.")
@@ -130,10 +136,6 @@ async def _start_upload_process(c: Client, m: Message):
                     await status_msg.edit(f"Download failed! Server returned status: `{resp.status}`")
                     return
                 
-                if not new_filename:
-                    parsed_url = urlparse(url)
-                    new_filename = os.path.basename(parsed_url.path) or f"Untitled_{time.time()}"
-
                 downloaded_size = 0
                 last_update_time = time.time()
                 
@@ -143,7 +145,6 @@ async def _start_upload_process(c: Client, m: Message):
                         f.write(chunk)
                         downloaded_size += len(chunk)
                         
-                        # Yield control to allow cancellation to be detected
                         await asyncio.sleep(0) 
 
                         current_time = time.time()
@@ -166,7 +167,7 @@ async def _start_upload_process(c: Client, m: Message):
         
         async def progress(current, total):
             nonlocal last_update_time
-            await asyncio.sleep(0) # Yield control
+            await asyncio.sleep(0)
             current_time = time.time()
             if current_time - last_update_time > 2:
                 try:
@@ -179,6 +180,8 @@ async def _start_upload_process(c: Client, m: Message):
                     pass
                 last_update_time = current_time
         
+        # --- Upload to BIN_CHANNEL ---
+        log_msg = None
         media_type = mimetypes.guess_type(file_save_path)[0]
         if media_type and media_type.startswith("video"):
              log_msg = await c.send_video(
@@ -190,6 +193,10 @@ async def _start_upload_process(c: Client, m: Message):
                 chat_id=Var.BIN_CHANNEL, document=file_save_path, thumb=thumb_path,
                 file_name=new_filename, progress=progress
              )
+        
+        if not log_msg:
+            await status_msg.edit("Failed to upload file to bin channel.")
+            return
 
         file_name = get_name(log_msg)
         file_hash = get_hash(log_msg)
@@ -197,7 +204,7 @@ async def _start_upload_process(c: Client, m: Message):
         stream_link = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         online_link = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
         
-        # --- NEW: Fetch footer and create custom caption for media ---
+        # --- Fetch footer and create custom caption ---
         user_info = await db.get_user_info(m.from_user.id)
         footer = user_info.get("footer", "")
         
@@ -205,20 +212,14 @@ async def _start_upload_process(c: Client, m: Message):
         if footer:
             final_caption += f"\n\n{footer}"
         
+        # --- Send file to user from BIN_CHANNEL ---
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]])
+        
         if log_msg.video:
-            await c.send_video(
-                chat_id=m.chat.id,
-                video=log_msg.video.file_id,
-                caption=final_caption,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]])
-            )
+            await m.reply_video(video=log_msg.video.file_id, caption=final_caption, reply_markup=reply_markup, quote=True)
         else:
-            await c.send_document(
-                chat_id=m.chat.id,
-                document=log_msg.document.file_id,
-                caption=final_caption,
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]])
-            )
+            await m.reply_document(document=log_msg.document.file_id, caption=final_caption, reply_markup=reply_markup, quote=True)
+        
         if status_msg:
             await status_msg.delete()
 
@@ -230,18 +231,18 @@ async def _start_upload_process(c: Client, m: Message):
     except Exception as e:
         if status_msg:
             await status_msg.edit(f"An error occurred: `{e}`")
+        print(f"URL Uploader Error: {e}")
+        import traceback
+        traceback.print_exc()
 
     finally:
         # Cleanup resources
         if os.path.exists(file_path):
             import shutil
-            shutil.rmtree(file_path)
-        if thumb_path and os.path.exists(thumb_path):
-            os.remove(thumb_path)
+            shutil.rmtree(file_path, ignore_errors=True)
 
 @StreamBot.on_message(filters.command("upload") & filters.private)
 async def url_upload_handler(c: Client, m: Message):
-    # For regular users, check if they have any active tasks. Admins can bypass this.
     if m.from_user.id not in Var.OWNER_ID and m.from_user.id in ACTIVE_UPLOADS and ACTIVE_UPLOADS.get(m.from_user.id):
         await m.reply_text("You already have an active upload process. Please wait for it to complete or use /cancel.", quote=True)
         return
@@ -250,11 +251,9 @@ async def url_upload_handler(c: Client, m: Message):
         await m.reply_text("<b>Usage:</b> /upload <direct_file_link> or reply to a link.")
         return
 
-    # Initialize the list of tasks for the user if it doesn't exist
     if m.from_user.id not in ACTIVE_UPLOADS:
         ACTIVE_UPLOADS[m.from_user.id] = []
 
-    # Create and track the task
     task = asyncio.create_task(_start_upload_process(c, m))
     ACTIVE_UPLOADS[m.from_user.id].append(task)
 
@@ -263,14 +262,12 @@ async def url_upload_handler(c: Client, m: Message):
     except CancelledError:
         pass
     finally:
-        # Ensure the user's task is always removed from the active list
         if m.from_user.id in ACTIVE_UPLOADS:
             try:
                 ACTIVE_UPLOADS[m.from_user.id].remove(task)
                 if not ACTIVE_UPLOADS[m.from_user.id]:
                     ACTIVE_UPLOADS.pop(m.from_user.id, None)
             except ValueError:
-                # Task might have been removed by the cancel command already
                 pass
 
 
@@ -280,14 +277,12 @@ async def universal_cancel_handler(c: Client, m: Message):
     cancelled_uploads = 0
     cancelled_twitter = 0
 
-    # Cancel URL Upload tasks
     if tasks := ACTIVE_UPLOADS.pop(user_id, None):
         cancelled_uploads = len(tasks)
         for task in tasks:
             if not task.done() and not task.cancelled():
                 task.cancel()
 
-    # Cancel Twitter tasks
     if tasks := ACTIVE_TWITTER_TASKS.pop(user_id, None):
         cancelled_twitter = len(tasks)
         for task in tasks:
