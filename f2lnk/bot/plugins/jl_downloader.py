@@ -86,35 +86,18 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
         print(f"[Extractor] An error occurred: {e}")
         return None
 
-# --- FINAL FIX: Fast HLS Download with Proper Frame Timing ---
+# --- Simple Fix: Just add faststart flag ---
 async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message, headers: dict):
-    """
-    Downloads HLS stream using ffmpeg with FAST copy mode but fixes frame timing issues.
-    This maintains original quality and speed while ensuring smooth playback.
-    """
+    """Downloads HLS stream using ffmpeg, passing browser headers for compatibility."""
     await status_msg.edit("**⬇️ Downloading HLS stream...**\n(This uses FFmpeg and may take some time.)")
     
     header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
     
-    # ULTIMATE FIX: Use stream copy for speed BUT add critical flags to fix playback issues
-    # -bsf:v h264_mp4toannexb = Fixes H.264 stream format issues
-    # -movflags +faststart = Enables smooth progressive playback
-    # -fflags +genpts = Regenerates presentation timestamps to fix frame timing
-    # -avoid_negative_ts make_zero = Prevents negative timestamp issues
+    # Simple fix: Just add -movflags +faststart for smooth playback
     process = await asyncio.create_subprocess_exec(
-        'ffmpeg', 
-        '-y',                                    # Overwrite output file
-        '-headers', header_str,                  # Pass browser headers
-        '-i', stream_url,                        # Input HLS stream
-        '-c', 'copy',                            # Copy streams (FAST - no re-encoding)
-        '-bsf:v', 'h264_mp4toannexb',           # Fix H.264 bitstream format
-        '-movflags', '+faststart',               # Enable progressive playback
-        '-fflags', '+genpts',                    # Generate presentation timestamps
-        '-avoid_negative_ts', 'make_zero',       # Fix negative timestamps
-        '-max_muxing_queue_size', '9999',        # Prevent sync issues
-        file_path,
-        stdout=asyncio.subprocess.PIPE, 
-        stderr=asyncio.subprocess.PIPE
+        'ffmpeg', '-y', '-headers', header_str, '-i', stream_url, 
+        '-c', 'copy', '-movflags', '+faststart', file_path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     
     _, stderr = await process.communicate()
