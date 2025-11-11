@@ -86,27 +86,32 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
         print(f"[Extractor] An error occurred: {e}")
         return None
 
-# --- Robust HLS Downloader with Headers (FIXED for smooth playback) ---
+# --- FINAL FIX: Fast HLS Download with Proper Frame Timing ---
 async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message, headers: dict):
-    """Downloads HLS stream using ffmpeg with proper re-encoding for smooth playback."""
+    """
+    Downloads HLS stream using ffmpeg with FAST copy mode but fixes frame timing issues.
+    This maintains original quality and speed while ensuring smooth playback.
+    """
     await status_msg.edit("**⬇️ Downloading HLS stream...**\n(This uses FFmpeg and may take some time.)")
     
     header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
     
-    # FIX: Use proper re-encoding instead of -c copy to ensure smooth playback
-    # This fixes frame timing issues and codec compatibility problems
+    # ULTIMATE FIX: Use stream copy for speed BUT add critical flags to fix playback issues
+    # -bsf:v h264_mp4toannexb = Fixes H.264 stream format issues
+    # -movflags +faststart = Enables smooth progressive playback
+    # -fflags +genpts = Regenerates presentation timestamps to fix frame timing
+    # -avoid_negative_ts make_zero = Prevents negative timestamp issues
     process = await asyncio.create_subprocess_exec(
         'ffmpeg', 
-        '-y',                           # Overwrite output file
-        '-headers', header_str,         # Pass browser headers
-        '-i', stream_url,               # Input HLS stream
-        '-c:v', 'libx264',              # Re-encode video with H.264 (ensures compatibility)
-        '-preset', 'fast',              # Balance between speed and quality
-        '-crf', '23',                   # Quality (18-28 range, 23 is good default)
-        '-c:a', 'aac',                  # Re-encode audio to AAC
-        '-b:a', '128k',                 # Audio bitrate
-        '-movflags', '+faststart',      # Enable streaming/progressive playback
-        '-max_muxing_queue_size', '1024', # Prevent muxing errors
+        '-y',                                    # Overwrite output file
+        '-headers', header_str,                  # Pass browser headers
+        '-i', stream_url,                        # Input HLS stream
+        '-c', 'copy',                            # Copy streams (FAST - no re-encoding)
+        '-bsf:v', 'h264_mp4toannexb',           # Fix H.264 bitstream format
+        '-movflags', '+faststart',               # Enable progressive playback
+        '-fflags', '+genpts',                    # Generate presentation timestamps
+        '-avoid_negative_ts', 'make_zero',       # Fix negative timestamps
+        '-max_muxing_queue_size', '9999',        # Prevent sync issues
         file_path,
         stdout=asyncio.subprocess.PIPE, 
         stderr=asyncio.subprocess.PIPE
@@ -187,8 +192,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         else:
             await status_msg.edit("**⬇️ Starting download...**")
             
-            # --- THE DEFINITIVE FIX FOR 'NoneType' ERROR ---
-            # This logic now correctly mirrors the working `xe.py` example.
             last_update = time.time()
             async with aiohttp.ClientSession() as session:
                 async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
@@ -198,7 +201,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
                     downloaded = 0
                     with open(file_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(1024 * 1024): # 1MB Chunks
+                        async for chunk in resp.content.iter_chunked(1024 * 1024):
                             f.write(chunk)
                             downloaded += len(chunk)
                             now = time.time()
@@ -215,7 +218,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         await status_msg.edit("**📤 Download complete! Uploading...**")
         
-        # FIX: Initialize last_update in the outer scope before the progress function
         last_update = time.time()
         
         async def up_progress(cur, tot):
@@ -234,7 +236,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         footer = user_info.get("footer", "")
         caption = f"**{filename}**" + (f"\n\n{footer}" if footer else "")
         
-        # FIX: Send video with proper error handling
         try:
             await client.send_video(
                 chat_id=message.chat.id,
