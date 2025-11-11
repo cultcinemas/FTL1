@@ -93,9 +93,10 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
     
     header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
     
-    # FIX: Added '-fflags +igndts' to fix potential timestamp issues causing video lag.
+    # THE DEFINITIVE FIX for lagging video: Use a bitstream filter to fix timestamps.
     process = await asyncio.create_subprocess_exec(
-        'ffmpeg', '-y', '-fflags', '+igndts', '-headers', header_str, '-i', stream_url, '-c', 'copy', file_path,
+        'ffmpeg', '-y', '-headers', header_str, '-i', stream_url, 
+        '-c', 'copy', '-bsf:v', 'h264_mp4toannexb', file_path,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     
