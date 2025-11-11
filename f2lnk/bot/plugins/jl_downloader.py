@@ -86,22 +86,30 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
         print(f"[Extractor] An error occurred: {e}")
         return None
 
-# --- Robust HLS Downloader with Headers ---
+# --- Robust HLS Downloader with Headers (FIXED for smooth playback) ---
 async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message, headers: dict):
-    """Downloads HLS stream using ffmpeg with re-encoding for smooth playback."""
+    """Downloads HLS stream using ffmpeg with proper re-encoding for smooth playback."""
     await status_msg.edit("**⬇️ Downloading HLS stream...**\n(This uses FFmpeg and may take some time.)")
     
     header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
     
-    # FIX: Re-encode with proper codec settings for smooth playback
+    # FIX: Use proper re-encoding instead of -c copy to ensure smooth playback
+    # This fixes frame timing issues and codec compatibility problems
     process = await asyncio.create_subprocess_exec(
-        'ffmpeg', '-y', '-headers', header_str, '-i', stream_url,
-        '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
-        '-c:a', 'aac', '-b:a', '128k',
-        '-movflags', '+faststart',
-        '-f', 'mp4',
+        'ffmpeg', 
+        '-y',                           # Overwrite output file
+        '-headers', header_str,         # Pass browser headers
+        '-i', stream_url,               # Input HLS stream
+        '-c:v', 'libx264',              # Re-encode video with H.264 (ensures compatibility)
+        '-preset', 'fast',              # Balance between speed and quality
+        '-crf', '23',                   # Quality (18-28 range, 23 is good default)
+        '-c:a', 'aac',                  # Re-encode audio to AAC
+        '-b:a', '128k',                 # Audio bitrate
+        '-movflags', '+faststart',      # Enable streaming/progressive playback
+        '-max_muxing_queue_size', '1024', # Prevent muxing errors
         file_path,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        stdout=asyncio.subprocess.PIPE, 
+        stderr=asyncio.subprocess.PIPE
     )
     
     _, stderr = await process.communicate()
