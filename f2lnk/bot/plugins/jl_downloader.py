@@ -86,17 +86,16 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
         print(f"[Extractor] An error occurred: {e}")
         return None
 
-# --- Simple Fix: Just add faststart flag ---
+# --- Robust HLS Downloader with Headers ---
 async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message, headers: dict):
     """Downloads HLS stream using ffmpeg, passing browser headers for compatibility."""
     await status_msg.edit("**⬇️ Downloading HLS stream...**\n(This uses FFmpeg and may take some time.)")
     
     header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
     
-    # Simple fix: Just add -movflags +faststart for smooth playback
+    # FIX: Added '-fflags +igndts' to fix potential timestamp issues causing video lag.
     process = await asyncio.create_subprocess_exec(
-        'ffmpeg', '-y', '-headers', header_str, '-i', stream_url, 
-        '-c', 'copy', '-movflags', '+faststart', file_path,
+        'ffmpeg', '-y', '-fflags', '+igndts', '-headers', header_str, '-i', stream_url, '-c', 'copy', file_path,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
     
@@ -175,6 +174,8 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         else:
             await status_msg.edit("**⬇️ Starting download...**")
             
+            # --- THE DEFINITIVE FIX FOR 'NoneType' ERROR ---
+            # This logic now correctly mirrors the working `xe.py` example.
             last_update = time.time()
             async with aiohttp.ClientSession() as session:
                 async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
@@ -184,7 +185,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
                     downloaded = 0
                     with open(file_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(1024 * 1024):
+                        async for chunk in resp.content.iter_chunked(1024 * 1024): # 1MB Chunks
                             f.write(chunk)
                             downloaded += len(chunk)
                             now = time.time()
@@ -201,6 +202,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         await status_msg.edit("**📤 Download complete! Uploading...**")
         
+        # FIX: Initialize last_update in the outer scope before the progress function
         last_update = time.time()
         
         async def up_progress(cur, tot):
@@ -219,6 +221,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         footer = user_info.get("footer", "")
         caption = f"**{filename}**" + (f"\n\n{footer}" if footer else "")
         
+        # FIX: Send video with proper error handling
         try:
             await client.send_video(
                 chat_id=message.chat.id,
