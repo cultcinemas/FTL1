@@ -100,7 +100,10 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
     """
     await status_msg.edit("⬇️ Downloading and Processing HLS stream...\n(This uses FFmpeg and may take some time as it's re-encoding for smooth playback.)")
     
-    header_str = "".join([f"{key}: {value}\r\n" for key, value in headers.items()])
+    # Create a *copy* of headers and remove 'Range' if it exists, as it can break FFmpeg HLS
+    ffmpeg_headers = headers.copy()
+    ffmpeg_headers.pop("Range", None)
+    header_str = "".join([f"{key}: {value}\r\n" for key, value in ffmpeg_headers.items()])
     
     process = await asyncio.create_subprocess_exec(
         'ffmpeg', 
@@ -136,9 +139,16 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
     thumb_path = None
     file_path = None
 
+    # --- HTTP 400 FIX: Expanded browser headers ---
+    # This makes the request look much more like a real browser to avoid being blocked.
+    parsed_page_origin = urlparse(page_url)
     browser_headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": page_url
+        "Referer": page_url,
+        "Accept": "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Origin": f"{parsed_page_origin.scheme}://{parsed_page_origin.netloc}",
+        "Range": "bytes=0-" # Request the start of the file
     }
 
     try:
@@ -150,7 +160,10 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
             direct_url = page_url
         else:
             status_msg = await message.reply_text("🔍 Scraping website for video...", quote=True)
-            direct_url = await extract_media_url(page_url, browser_headers)
+            # Use a copy of headers for scraping, without 'Range'
+            scraping_headers = browser_headers.copy()
+            scraping_headers.pop("Range", None)
+            direct_url = await extract_media_url(page_url, scraping_headers)
             if not direct_url:
                 await status_msg.edit("❌ Failed to find a downloadable video.")
                 return
@@ -162,9 +175,16 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         if not is_hls:
             try:
-                # FIX: Pass headers to head() request to avoid HTTP 400/403 errors during size check.
+                # Use HEAD request headers (including Range) to check size
                 async with aiohttp.ClientSession() as s, s.head(direct_url, headers=browser_headers, timeout=20) as r:
-                    if r.status == 200: total_size = int(r.headers.get("Content-Length", 0))
+                    if r.status == 200 or r.status == 206: # 206 Partial Content is OK
+                        total_size = int(r.headers.get("Content-Length", 0))
+                        # If server replies with Content-Range, it's more accurate
+                        if "Content-Range" in r.headers:
+                            try:
+                                total_size = int(r.headers["Content-Range"].split("/")[-1])
+                            except:
+                                pass # Keep Content-Length
             except Exception: pass
 
         if total_size > 1.95 * 1024**3:
@@ -196,8 +216,9 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
             
             last_update = time.time()
             async with aiohttp.ClientSession() as session:
+                # Use all browser_headers for the download
                 async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
-                    if resp.status != 200:
+                    if resp.status not in [200, 206]: # Allow 200 (OK) and 206 (Partial Content)
                         await status_msg.edit(f"❌ Download failed – HTTP {resp.status}")
                         return
 
@@ -220,7 +241,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         await status_msg.edit("📤 Download complete! Uploading...")
         
-        # FIX: Initialize last_update in the outer scope before the progress function
         last_update = time.time()
         
         async def up_progress(cur, tot):
@@ -239,7 +259,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         footer = user_info.get("footer", "")
         caption = f"{filename}" + (f"\n\n{footer}" if footer else "")
         
-        # FIX: Send video with proper error handling
         try:
             await client.send_video(
                 chat_id=message.chat.id,
@@ -278,4 +297,4 @@ async def jl_handler(client: Client, m: Message):
         return
 
     await process_jl_task(client, m, url)
-    
+                            
