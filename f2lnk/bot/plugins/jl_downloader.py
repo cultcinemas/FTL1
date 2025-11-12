@@ -54,7 +54,6 @@ def humanbytes(size: int) -> str:
 async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
     """
     Async function to extract media URL from a webpage by parsing HTML and falling back to regex.
-    (Includes FIX for SyntaxError)
     """
     try:
         timeout = aiohttp.ClientTimeout(total=30)
@@ -75,7 +74,7 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
                 return tag["src"]
 
         patterns = [
-            # FIX: SyntaxError solved by using r'source\s*:\s*["\']'
+            # FIX: Corrected SyntaxError: EOL while scanning string literal
             r'source\s*:\s*["\']', 
             r'"file"\s*:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
             r'"src"\s:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
@@ -97,7 +96,7 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
     """
     Downloads HLS stream using ffmpeg, passing browser headers and RE-ENCODING for smooth playback.
     
-    (Includes FIX for video lagging/choppiness by using explicit codecs)
+    FIX: Re-encoding with libx264/aac instead of '-c copy' to fix timestamp and lagging-frame issues.
     """
     await status_msg.edit("⬇️ Downloading and Processing HLS stream...\n(This uses FFmpeg and may take some time as it's re-encoding for smooth playback.)")
     
@@ -108,10 +107,10 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
         '-y', 
         '-headers', header_str, 
         '-i', stream_url, 
-        '-c:v', 'libx264',    # Video codec: H.264 for compatibility and smooth frames
-        '-c:a', 'aac',       # Audio codec: AAC
-        '-b:a', '128k',      # Audio bitrate (recommended)
-        '-crf', '23',        # Constant Rate Factor for quality balance
+        '-c:v', 'libx264',    # Video codec: H.264 (Universally compatible)
+        '-c:a', 'aac',       # Audio codec: AAC (Standard for MP4)
+        '-b:a', '128k',      # Audio bitrate (Good default)
+        '-crf', '23',        # Quality setting (Good balance)
         '-movflags', '+faststart', # Optimize for web streaming
         file_path,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -190,14 +189,13 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         file_path = os.path.join(temp_dir, filename)
 
         if is_hls:
+            # Calls the fixed HLS download function
             await download_hls_stream(direct_url, file_path, status_msg, browser_headers)
         else:
             await status_msg.edit("⬇️ Starting download...")
             
-            # --- THE DEFINITIVE FIX FOR 'NoneType' ERROR (Download logic) ---
             last_update = time.time()
             async with aiohttp.ClientSession() as session:
-                # Headers included here for the download GET request
                 async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
                     if resp.status != 200:
                         await status_msg.edit(f"❌ Download failed – HTTP {resp.status}")
@@ -222,6 +220,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         await status_msg.edit("📤 Download complete! Uploading...")
         
+        # FIX: Initialize last_update in the outer scope before the progress function
         last_update = time.time()
         
         async def up_progress(cur, tot):
@@ -279,4 +278,4 @@ async def jl_handler(client: Client, m: Message):
         return
 
     await process_jl_task(client, m, url)
-            
+    
