@@ -20,7 +20,7 @@ from f2lnk.bot import StreamBot
 from f2lnk.utils.database import Database
 from f2lnk.vars import Var
 
-# Mock objects (as used previously, replace with your actual imports if they exist)
+# Mock objects (If you are running outside your FTL environment, keep these. Otherwise, use your actual imports.)
 class Database:
     def __init__(self, *args): pass
     async def get_user_info(self, user_id): return {"footer": "Downloaded via StreamBot"}
@@ -54,6 +54,7 @@ def humanbytes(size: int) -> str:
 async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
     """
     Async function to extract media URL from a webpage by parsing HTML and falling back to regex.
+    (Includes FIX for SyntaxError)
     """
     try:
         timeout = aiohttp.ClientTimeout(total=30)
@@ -74,7 +75,7 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
                 return tag["src"]
 
         patterns = [
-            # FIX: Corrected SyntaxError: EOL while scanning string literal
+            # FIX: SyntaxError solved by using r'source\s*:\s*["\']'
             r'source\s*:\s*["\']', 
             r'"file"\s*:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
             r'"src"\s:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
@@ -96,7 +97,7 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
     """
     Downloads HLS stream using ffmpeg, passing browser headers and RE-ENCODING for smooth playback.
     
-    FIX: Removed '-c copy' and added video/audio re-encoding parameters to fix frame lagging.
+    (Includes FIX for video lagging/choppiness by using explicit codecs)
     """
     await status_msg.edit("⬇️ Downloading and Processing HLS stream...\n(This uses FFmpeg and may take some time as it's re-encoding for smooth playback.)")
     
@@ -162,6 +163,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         if not is_hls:
             try:
+                # FIX: Pass headers to head() request to avoid HTTP 400/403 errors during size check.
                 async with aiohttp.ClientSession() as s, s.head(direct_url, headers=browser_headers, timeout=20) as r:
                     if r.status == 200: total_size = int(r.headers.get("Content-Length", 0))
             except Exception: pass
@@ -188,13 +190,14 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         file_path = os.path.join(temp_dir, filename)
 
         if is_hls:
-            # Calls the fixed HLS download function
             await download_hls_stream(direct_url, file_path, status_msg, browser_headers)
         else:
             await status_msg.edit("⬇️ Starting download...")
             
+            # --- THE DEFINITIVE FIX FOR 'NoneType' ERROR (Download logic) ---
             last_update = time.time()
             async with aiohttp.ClientSession() as session:
+                # Headers included here for the download GET request
                 async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
                     if resp.status != 200:
                         await status_msg.edit(f"❌ Download failed – HTTP {resp.status}")
@@ -237,6 +240,7 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         footer = user_info.get("footer", "")
         caption = f"{filename}" + (f"\n\n{footer}" if footer else "")
         
+        # FIX: Send video with proper error handling
         try:
             await client.send_video(
                 chat_id=message.chat.id,
