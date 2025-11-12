@@ -16,16 +16,11 @@ from pyrogram.errors import MessageNotModified
 from pyromod.exceptions import ListenerTimeout
 
 # Assuming these are imported correctly from your project environment
-# from f2lnk.bot import StreamBot
-# from f2lnk.utils.database import Database
-# from f2lnk.vars import Var
+from f2lnk.bot import StreamBot
+from f2lnk.utils.database import Database
+from f2lnk.vars import Var
 
-# Mock objects for code completeness and testing outside your specific bot environment
-class StreamBot:
-    @staticmethod
-    def on_message(arg):
-        return lambda func: func
-
+# Mock objects (as used previously, replace with your actual imports if they exist)
 class Database:
     def __init__(self, *args): pass
     async def get_user_info(self, user_id): return {"footer": "Downloaded via StreamBot"}
@@ -79,9 +74,10 @@ async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
                 return tag["src"]
 
         patterns = [
-            r'source\s*:\s*"'["']',
+            # FIX: Corrected SyntaxError: EOL while scanning string literal
+            r'source\s*:\s*["\']', 
             r'"file"\s*:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
-            r'"src"\s*:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
+            r'"src"\s:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
             r'https?://[^\s"\'<>]+.(?:mp4|mkv|webm|m3u8)[^\s"\'<>]'
         ]
         for pattern in patterns:
@@ -100,8 +96,7 @@ async def download_hls_stream(stream_url: str, file_path: str, status_msg: Messa
     """
     Downloads HLS stream using ffmpeg, passing browser headers and RE-ENCODING for smooth playback.
     
-    FIX: Removed '-c copy' and added '-c:v libx264 -c:a aac' to re-encode the stream, 
-    fixing the choppy/lagging frame issue.
+    FIX: Removed '-c copy' and added video/audio re-encoding parameters to fix frame lagging.
     """
     await status_msg.edit("⬇️ Downloading and Processing HLS stream...\n(This uses FFmpeg and may take some time as it's re-encoding for smooth playback.)")
     
@@ -224,7 +219,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
 
         await status_msg.edit("📤 Download complete! Uploading...")
         
-        # FIX: Initialize last_update in the outer scope before the progress function
         last_update = time.time()
         
         async def up_progress(cur, tot):
@@ -243,7 +237,6 @@ async def process_jl_task(client: Client, message: Message, page_url: str):
         footer = user_info.get("footer", "")
         caption = f"{filename}" + (f"\n\n{footer}" if footer else "")
         
-        # FIX: Send video with proper error handling
         try:
             await client.send_video(
                 chat_id=message.chat.id,
@@ -282,4 +275,4 @@ async def jl_handler(client: Client, m: Message):
         return
 
     await process_jl_task(client, m, url)
-                        
+            
