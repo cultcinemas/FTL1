@@ -10,7 +10,7 @@ import shutil
 from urllib.parse import quote_plus, urlparse
 from asyncio import CancelledError
 
-from pyrogram import filters, Client
+from pyrogram import filters, Client, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
 from pyromod.exceptions import ListenerTimeout
@@ -50,7 +50,10 @@ async def get_tweet_media(tweet_id: str):
 async def _run_twitter_process(c: Client, m: Message):
     """The core, cancellable logic for handling a Twitter URL."""
     status_msg = None
-    download_dir = f"downloads/{m.from_user.id}_{int(datetime.datetime.now().timestamp())}/"
+    
+    # Handle ID for folder naming (User ID or Chat ID for channels)
+    unique_id = m.from_user.id if m.from_user else m.chat.id
+    download_dir = f"downloads/{unique_id}_{int(datetime.datetime.now().timestamp())}/"
     
     try:
         match = re.search(TWITTER_URL_REGEX, m.text)
@@ -71,13 +74,15 @@ async def _run_twitter_process(c: Client, m: Message):
             original_filename = os.path.basename(urlparse(media_url).path)
             new_filename = original_filename
             
-            try:
-                ask_filename = await c.ask(chat_id=m.chat.id, text=f"**File {item_index + 1}/{len(media_items)}:** `{original_filename}`\n\nSend a new filename including extension, or send /skip to use the default.", timeout=180)
-                if ask_filename.text and ask_filename.text.lower() != "/skip":
-                    new_filename = ask_filename.text
-            except ListenerTimeout:
-                await m.reply_text("⌛ Timeout. Using original filename.", quote=True)
-
+            # ask_filename only works in Private or Groups (Channels cannot reply)
+            if m.chat.type != enums.ChatType.CHANNEL:
+                try:
+                    ask_filename = await c.ask(chat_id=m.chat.id, text=f"**File {item_index + 1}/{len(media_items)}:** `{original_filename}`\n\nSend a new filename including extension, or send /skip to use the default.", timeout=180)
+                    if ask_filename.text and ask_filename.text.lower() != "/skip":
+                        new_filename = ask_filename.text
+                except ListenerTimeout:
+                    await m.reply_text("⌛ Timeout. Using original filename.", quote=True)
+            
             await status_msg.edit(f"Checking details for **{new_filename}**...")
             try:
                 async with aiohttp.ClientSession() as session:
@@ -91,7 +96,8 @@ async def _run_twitter_process(c: Client, m: Message):
                 await m.reply_text(f"Skipping **{new_filename}**. File size (**{humanbytes(file_size)}**) is over the 1.95 GB limit.", quote=True)
                 continue
 
-            if m.from_user.id not in Var.OWNER_ID:
+            # Check User Tier Limits (Only for Users, skip for Channels or Owner)
+            if m.from_user and m.from_user.id not in Var.OWNER_ID:
                 await db.check_and_update_tier(m.from_user.id)
                 user_data = await db.get_user_info(m.from_user.id)
                 user_tier = user_data.get('tier', Var.DEFAULT_PLAN)
@@ -138,9 +144,13 @@ async def _run_twitter_process(c: Client, m: Message):
             else: # Send images and other types as files
                 log_msg = await c.send_document(Var.BIN_CHANNEL, download_path, thumb=thumb_path, file_name=new_filename)
 
+            # Dump log info
+            user_link = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})" if m.from_user else f"{m.chat.title} (Channel)"
+            user_id_text = f"`{m.from_user.id}`" if m.from_user else f"`{m.chat.id}`"
+            
             dump_log_text = (f"**File:** **{new_filename}**\n"
-                             f"**User:** [{m.from_user.first_name}](tg://user?id={m.from_user.id})\n"
-                             f"**User ID:** `{m.from_user.id}`\n"
+                             f"**User/Source:** {user_link}\n"
+                             f"**ID:** {user_id_text}\n"
                              f"**Source Tweet:** {m.text}")
             await log_msg.reply_text(dump_log_text, quote=True, disable_web_page_preview=True)
 
@@ -150,8 +160,10 @@ async def _run_twitter_process(c: Client, m: Message):
             markup = InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream), InlineKeyboardButton('DOWNLOAD 🔻', url=download)]])
             
             # --- NEW: Fetch footer and create custom caption ---
-            user_info = await db.get_user_info(m.from_user.id)
-            footer = user_info.get("footer", "")
+            footer = ""
+            if m.from_user:
+                user_info = await db.get_user_info(m.from_user.id)
+                footer = user_info.get("footer", "")
             
             caption = f"**{file_name}**"
             if footer:
@@ -163,8 +175,13 @@ async def _run_twitter_process(c: Client, m: Message):
             else:
                 await m.reply_document(log_msg.document.file_id, caption=caption, reply_markup=markup, quote=True)
             
-            await db.update_user_stats(m.from_user.id, file_size)
-            await c.send_message(Var.LOG_CHANNEL, f"**Link Generated (Twitter)**\n\n**User:** **{m.from_user.first_name}** (`{m.from_user.id}`)\n**File:** **{file_name}**\n**Download:** [Click Here]({download})", disable_web_page_preview=True)
+            if m.from_user:
+                await db.update_user_stats(m.from_user.id, file_size)
+            
+            user_name_log = m.from_user.first_name if m.from_user else m.chat.title
+            user_id_log = m.from_user.id if m.from_user else m.chat.id
+            
+            await c.send_message(Var.LOG_CHANNEL, f"**Link Generated (Twitter)**\n\n**Source:** **{user_name_log}** (`{user_id_log}`)\n**File:** **{file_name}**\n**Download:** [Click Here]({download})", disable_web_page_preview=True)
 
     except CancelledError:
         if status_msg:
@@ -179,38 +196,78 @@ async def _run_twitter_process(c: Client, m: Message):
             await asyncio.sleep(3)
             await status_msg.delete()
 
-@StreamBot.on_message(filters.regex(TWITTER_URL_REGEX) & filters.private, group=3)
+@StreamBot.on_message(filters.regex(TWITTER_URL_REGEX) & (filters.private | filters.group | filters.channel), group=3)
 async def twitter_task_handler(c: Client, m: Message):
     """Starts and manages the Twitter download task."""
-    user_id = m.from_user.id
     
-    # For regular users, check if they have any active tasks. Admins can bypass this.
-    if user_id not in Var.OWNER_ID and user_id in ACTIVE_TWITTER_TASKS and ACTIVE_TWITTER_TASKS.get(user_id):
+    # 1. Maintenance Check
+    if is_maintenance_mode():
+        # Only Owner can use in maintenance
+        if not m.from_user or m.from_user.id not in Var.OWNER_ID:
+            if m.chat.type == enums.ChatType.PRIVATE:
+                await m.reply_text("The bot is currently under maintenance. Please try again later.", quote=True)
+            return
+
+    # 2. Authorization Check (Logic matching stream.py)
+    is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
+    if is_bot_locked:
+        is_authorized = False
+        
+        # Check User Auth (if Private)
+        if m.from_user:
+            is_in_env = Var.AUTH_USERS and str(m.from_user.id) in Var.AUTH_USERS.split()
+            is_in_db = await db.is_user_authorized(m.from_user.id)
+            if is_in_env or is_in_db or m.from_user.id in Var.OWNER_ID:
+                is_authorized = True
+
+        # Check Chat Auth (Group/Channel)
+        if not is_authorized:
+            if await db.is_user_authorized(m.chat.id):
+                is_authorized = True
+        
+        if not is_authorized:
+            # If Channel, leave. If Group/Private, reply or ignore.
+            if m.chat.type == enums.ChatType.CHANNEL:
+                await c.leave_chat(m.chat.id)
+                return
+            elif m.chat.type == enums.ChatType.PRIVATE:
+                await m.reply_text("You are not authorized to use this bot.", True)
+                return
+            else:
+                # Group: Ignore silent failure for non-auth groups
+                return
+
+    # 3. Identify Task Key (User ID or Chat ID)
+    task_key = m.from_user.id if m.from_user else m.chat.id
+    
+    # 4. Check for Active Tasks (Skip for Owner)
+    is_owner = m.from_user and m.from_user.id in Var.OWNER_ID
+    if not is_owner and task_key in ACTIVE_TWITTER_TASKS and ACTIVE_TWITTER_TASKS.get(task_key):
         await m.reply_text("You already have an active process running. Please wait for it to complete or use /cancel.", quote=True)
         return
 
-    # Initial checks (auth, ban, maintenance) can be placed here
-    if await db.is_banned(user_id):
-        await m.reply_text(Var.BAN_ALERT, quote=True)
-        return
+    # 5. Ban Check (Only for Users)
+    if m.from_user:
+        if await db.is_banned(m.from_user.id):
+            await m.reply_text(Var.BAN_ALERT, quote=True)
+            return
 
-    # Initialize the list of tasks for the user if it doesn't exist
-    if user_id not in ACTIVE_TWITTER_TASKS:
-        ACTIVE_TWITTER_TASKS[user_id] = []
+    # Initialize the list of tasks if it doesn't exist
+    if task_key not in ACTIVE_TWITTER_TASKS:
+        ACTIVE_TWITTER_TASKS[task_key] = []
 
     task = asyncio.create_task(_run_twitter_process(c, m))
-    ACTIVE_TWITTER_TASKS[user_id].append(task)
+    ACTIVE_TWITTER_TASKS[task_key].append(task)
     try:
         await task
     except CancelledError:
         pass # The task itself handles the cancellation message
     finally:
-        # Ensure the user's task is always removed from the active list when it's done
-        if user_id in ACTIVE_TWITTER_TASKS:
+        # Ensure the task is always removed from the active list when it's done
+        if task_key in ACTIVE_TWITTER_TASKS:
             try:
-                ACTIVE_TWITTER_TASKS[user_id].remove(task)
-                if not ACTIVE_TWITTER_TASKS[user_id]:
-                    ACTIVE_TWITTER_TASKS.pop(user_id, None)
+                ACTIVE_TWITTER_TASKS[task_key].remove(task)
+                if not ACTIVE_TWITTER_TASKS[task_key]:
+                    ACTIVE_TWITTER_TASKS.pop(task_key, None)
             except ValueError:
-                # Task might have been removed by the cancel command already
                 pass
