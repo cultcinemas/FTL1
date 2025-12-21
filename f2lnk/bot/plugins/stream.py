@@ -132,8 +132,7 @@ async def private_receive_handler(c: Client, m: Message):
     except Exception as e:
         print(f"Error in private_receive_handler link generation: {e}")
 
-# Removed ~filters.forwarded to allow forwarded files in channels
-@StreamBot.on_message(filters.channel & (filters.document | filters.video | filters.photo), group=-1)
+@StreamBot.on_message(filters.channel & (filters.document | filters.video | filters.photo) & ~filters.forwarded, group=-1)
 async def channel_receive_handler(bot, broadcast):
     if is_maintenance_mode():
         return
@@ -153,13 +152,7 @@ async def channel_receive_handler(bot, broadcast):
         
         footer = "" # No user-specific footer in channels
         
-        # FIXED: Changed edit_message_text to edit_message_caption because channels send files (media), not text.
-        await bot.edit_message_caption(
-            chat_id=broadcast.chat.id, 
-            message_id=broadcast.id, 
-            caption=msg_text.format(file_name, footer, humanbytes(file_size), online_link, stream_link), 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]])
-        )
+        await bot.edit_message_text(chat_id=broadcast.chat.id, message_id=broadcast.id, text=msg_text.format(file_name, footer, humanbytes(file_size), online_link, stream_link), disable_web_page_preview=True, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("STREAM 🔺", url=stream_link), InlineKeyboardButton('DOWNLOAD 🔻', url=online_link)]]))
         
         log_text = (
             f"**Link Generated (Channel)**\n\n"
@@ -174,22 +167,14 @@ async def channel_receive_handler(bot, broadcast):
     except Exception as e:
         print(f"Error in channel handler: {e}")
 
-# Removed ~filters.forwarded to allow forwarded files in groups
-@StreamBot.on_message(filters.group & (filters.document | filters.video | filters.audio | filters.photo), group=5)
+@StreamBot.on_message(filters.group & (filters.document | filters.video | filters.audio | filters.photo) & ~filters.forwarded, group=5)
 async def group_receive_handler(bot: Client, m: Message):
     if is_maintenance_mode() and m.from_user and m.from_user.id not in Var.OWNER_ID:
         return
 
     is_bot_locked = Var.AUTH_USERS or await db.has_authorized_users()
-    
-    # FIXED: Logic to check authorization. If bot is locked:
-    # 1. Check if group is authorized.
-    # 2. OR check if the SENDER (User) is the Owner (allows you to test in non-added groups).
-    if is_bot_locked:
-        is_group_auth = await db.is_user_authorized(m.chat.id)
-        is_owner = m.from_user and m.from_user.id in Var.OWNER_ID
-        if not is_group_auth and not is_owner:
-            return
+    if is_bot_locked and not await db.is_user_authorized(m.chat.id):
+        return
 
     # --- UPDATED --- Feature 1 & 2: Tiered Daily Usage Limit Check
     if m.from_user and m.from_user.id not in Var.OWNER_ID:
