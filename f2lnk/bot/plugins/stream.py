@@ -143,15 +143,17 @@ async def channel_receive_handler(bot: Client, broadcast: Message):
     stream = f"{Var.URL.rstrip('/')}/watch/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
     download = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
 
-    await bot.edit_message_text(
-        broadcast.chat.id,
-        broadcast.id,
-        msg_text.format(file_name, "", humanbytes(file_size), download, stream),
-        disable_web_page_preview=True,
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton("STREAM 🔺", url=stream),
-              InlineKeyboardButton("DOWNLOAD 🔻", url=download)]]
-        )
+    await bot.edit_message_caption(
+    chat_id=broadcast.chat.id,
+    message_id=broadcast.id,
+    caption=msg_text.format(file_name, "", humanbytes(file_size), stream, download),
+    disable_web_page_preview=True,
+    reply_markup=InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("STREAM 🔺", url=stream),
+            InlineKeyboardButton("DOWNLOAD 🔻", url=download)
+        ]]
+    )
     )
 
 # =========================
@@ -183,7 +185,7 @@ async def group_receive_handler(bot: Client, m: Message):
     download = f"{Var.URL.rstrip('/')}/{log_msg.id}/{quote_plus(file_name)}?hash={file_hash}"
 
     await m.reply_text(
-        msg_text.format(file_name, footer, humanbytes(file_size), download, stream),
+        msg_text.format(file_name, footer, humanbytes(file_size), stream, download),
         disable_web_page_preview=True,
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("STREAM 🔺", url=stream),
