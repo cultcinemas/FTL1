@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     mediainfo \
     p7zip-full \
+    gcc \
+    libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
