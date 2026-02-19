@@ -9,7 +9,7 @@ bisal_grp = "https://t.me/+PA8OPL2Zglk3MDM1"
 
 class Var(object):
     AUTH_USERS = '' # Add id of users you want to authorize to use the bot. Separated by spaces
-    MULTI_CLIENT = false
+    MULTI_CLIENT = False
     API_ID = int(getenv('API_ID', '28737888'))
     API_HASH = str(getenv('API_HASH', 'aa9fc525a5e5a837256c1f0b445af447'))
     BOT_TOKEN = str(getenv('BOT_TOKEN' , '7386512270:AAHMk189NkdiTRKnFIDGnG8Fp13sUfqKuAs'))
