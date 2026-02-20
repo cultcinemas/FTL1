@@ -23,19 +23,20 @@ class TaskStatus(str, Enum):
     WAITING_FOR_DONE       = "WAITING_FOR_DONE"
     DOWNLOADING            = "DOWNLOADING"
     MERGING                = "MERGING"
+    PROCESSING             = "PROCESSING"
     UPLOADING              = "UPLOADING"
     COMPLETED              = "COMPLETED"
     CANCELLING             = "CANCELLING"
     CANCELLED              = "CANCELLED"
     FAILED                 = "FAILED"
 
-# States that allow cancellation
 CANCELLABLE_STATES = {
     TaskStatus.COMMAND_RECEIVED,
     TaskStatus.TOOL_SELECTION_PENDING,
     TaskStatus.WAITING_FOR_DONE,
     TaskStatus.DOWNLOADING,
     TaskStatus.MERGING,
+    TaskStatus.PROCESSING,
     TaskStatus.UPLOADING,
 }
 
@@ -44,8 +45,24 @@ CANCELLABLE_STATES = {
 AVAILABLE_TOOLS = {
     "vt": "Video + Video Merge (-vt)",
     "va": "Video + Audio Merge (-va)",
+    "aa": "Audio + Audio Merge (-aa)",
+    "vs": "Video + Subtitle Merge (-vs)",
+    "cv": "Compress Video (-cv)",
+    "wv": "Watermark Video (-wv)",
 }
 DEFAULT_TOOL = "vt"
+
+# File extensions for auto-detection
+VIDEO_EXTENSIONS = {
+    ".mp4", ".mkv", ".avi", ".webm", ".mov", ".flv", ".ts", ".wmv", ".m4v",
+}
+AUDIO_EXTENSIONS = {
+    ".mp3", ".aac", ".ogg", ".flac", ".wav", ".m4a", ".opus", ".wma",
+    ".ac3", ".eac3", ".dts",
+}
+SUBTITLE_EXTENSIONS = {
+    ".srt", ".ass", ".ssa", ".vtt", ".sub", ".sup", ".idx",
+}
 
 # ──────────────────── Task Object ────────────────────
 
@@ -58,21 +75,39 @@ class LeechTask:
     user_id: int
     chat_id: int
     file_count: int                              # -i value
-    output_name: str                             # -m value (with .mp4 guaranteed)
-    suggested_tool: str = DEFAULT_TOOL           # from command flags
-    selected_tool: Optional[str] = None          # confirmed by user
-    audio_mode: Optional[int] = None              # 1=remove original, 2=keep original
+    output_name: str                             # -m value
+    suggested_tool: str = DEFAULT_TOOL
+    selected_tool: Optional[str] = None
     status: TaskStatus = TaskStatus.COMMAND_RECEIVED
 
-    # File tracking
-    file_messages: list = field(default_factory=list)      # Telegram message objects
-    download_paths: list = field(default_factory=list)     # local paths after download
+    # ── File tracking ──
+    file_messages: list = field(default_factory=list)
+    download_paths: list = field(default_factory=list)
 
-    # Worker tracking
-    download_tasks: list = field(default_factory=list)     # asyncio.Task objects
+    # ── Worker tracking ──
+    download_tasks: list = field(default_factory=list)
     merge_process: Optional[asyncio.subprocess.Process] = None
 
-    # Internal
+    # ── VA tool ──
+    audio_mode: Optional[int] = None              # 1=remove original, 2=keep original
+
+    # ── VS tool ──
+    subtitle_mode: Optional[int] = None           # 1=hardcode, 2=soft
+    hardcode_sub_index: Optional[int] = None      # which sub to burn (hardcode)
+
+    # ── CV tool ──
+    compress_mode: Optional[int] = None           # 1-5
+    target_size_mb: Optional[float] = None        # for mode 4
+    custom_crf: Optional[int] = None              # for mode 5
+
+    # ── WV tool ──
+    watermark_type: Optional[str] = None          # "text" or "image"
+    watermark_text: Optional[str] = None
+    watermark_image_path: Optional[str] = None
+    watermark_mode: Optional[int] = None          # 1-8
+    watermark_position: Optional[str] = None      # tl/tr/bl/br/center
+
+    # ── Internal ──
     work_dir: str = ""
     created_at: float = field(default_factory=time.time)
     cancel_event: Optional[asyncio.Event] = None
@@ -141,7 +176,7 @@ async def cancel_task(task: LeechTask) -> bool:
             task.merge_process.kill()
             await task.merge_process.wait()
         except Exception as e:
-            logger.warning("Error killing merge process for task %s: %s", task.task_id, e)
+            logger.warning("Error killing process for task %s: %s", task.task_id, e)
 
     cleanup_task_files(task)
     task.status = TaskStatus.CANCELLED
