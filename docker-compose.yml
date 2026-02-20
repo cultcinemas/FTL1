@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   worker:
     container_name: FTL1
@@ -8,3 +6,4 @@ services:
     restart: on-failure
     ports:
       - "3031:8080"
+      
