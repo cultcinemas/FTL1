@@ -21,6 +21,10 @@ async def initialize_clients():
             if client_id == len(all_tokens):
                 await asyncio.sleep(2)
                 print("This will take some time, please wait...")
+            
+            # Stagger client startup to dodge FloodWait
+            await asyncio.sleep(client_id * 1.5)
+            
             client = await Client(
                 name=str(client_id),
                 api_id=Var.API_ID,
@@ -42,3 +46,4 @@ async def initialize_clients():
         print("Multi-Client Mode Enabled")
     else:
         print("No additional clients were initialized, using default client")
+        
