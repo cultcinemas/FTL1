@@ -9,6 +9,7 @@ import shutil
 import asyncio
 import logging
 from enum import Enum
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -19,7 +20,6 @@ logger = logging.getLogger(__name__)
 class TaskStatus(str, Enum):
     IDLE                   = "IDLE"
     COMMAND_RECEIVED       = "COMMAND_RECEIVED"
-    COLLECTING_FILES       = "COLLECTING_FILES"
     TOOL_SELECTION_PENDING = "TOOL_SELECTION_PENDING"
     WAITING_FOR_DONE       = "WAITING_FOR_DONE"
     DOWNLOADING            = "DOWNLOADING"
@@ -33,7 +33,6 @@ class TaskStatus(str, Enum):
 # States that allow cancellation
 CANCELLABLE_STATES = {
     TaskStatus.COMMAND_RECEIVED,
-    TaskStatus.COLLECTING_FILES,
     TaskStatus.TOOL_SELECTION_PENDING,
     TaskStatus.WAITING_FOR_DONE,
     TaskStatus.DOWNLOADING,
@@ -48,9 +47,58 @@ AVAILABLE_TOOLS = {
 }
 DEFAULT_TOOL = "vt"
 
+# ──────────────────── File Buffer ────────────────────
+# Stores incoming media message objects per user BEFORE /leech is called.
+# key = user_id (int), value = list of pyrogram Message objects
+FILE_BUFFER: Dict[int, list] = defaultdict(list)
+
+# Maximum files to keep in buffer per user (prevent memory bloat)
+MAX_BUFFER_SIZE = 50
+
+
+def buffer_file(user_id: int, message) -> int:
+    """
+    Add a media message to the user's file buffer.
+    Returns the new buffer size.
+    """
+    buf = FILE_BUFFER[user_id]
+    buf.append(message)
+    # Trim old files if buffer exceeds max
+    if len(buf) > MAX_BUFFER_SIZE:
+        FILE_BUFFER[user_id] = buf[-MAX_BUFFER_SIZE:]
+    return len(FILE_BUFFER[user_id])
+
+
+def get_buffered_files(user_id: int, count: int) -> list:
+    """
+    Get the last `count` files from the user's buffer.
+    Returns a list of Message objects (may be shorter than count).
+    """
+    buf = FILE_BUFFER.get(user_id, [])
+    return buf[-count:]
+
+
+def clear_buffer(user_id: int) -> None:
+    """Clear the user's file buffer after files are consumed."""
+    FILE_BUFFER.pop(user_id, None)
+
+
+def consume_buffer(user_id: int, count: int) -> list:
+    """
+    Pop the last `count` files from the buffer (removing them).
+    Returns the consumed messages.
+    """
+    buf = FILE_BUFFER.get(user_id, [])
+    consumed = buf[-count:]
+    # Remove consumed files from buffer
+    FILE_BUFFER[user_id] = buf[:-count] if count < len(buf) else []
+    return consumed
+
+
 # ──────────────────── Task Object ────────────────────
 
 TASKS_ROOT = "./tasks"
+
 
 @dataclass
 class LeechTask:
@@ -97,6 +145,7 @@ class LeechTask:
     @property
     def downloads_completed(self) -> int:
         return sum(1 for t in self.download_tasks if t.done() and not t.cancelled())
+
 
 # ──────────────────── Global Registry ────────────────────
 
@@ -172,3 +221,4 @@ def cleanup_task_files(task: LeechTask) -> None:
             logger.info("Cleaned up files for task %s", task.task_id)
         except Exception as e:
             logger.warning("Cleanup error for task %s: %s", task.task_id, e)
+            
