@@ -7,12 +7,12 @@ bot_name = "Bɪɪsᴀʟ Fɪʟᴇ2Lɪɴᴋ Bᴏᴛ"
 bisal_channel = "https://telegram.me/bisal_files"
 bisal_grp = "https://t.me/+PA8OPL2Zglk3MDM1"
 
-class Var(object):
-    AUTH_USERS = '' # Add id of users you want to authorize to use the bot. Separated by spaces
-    MULTI_CLIENT = True
+10→class Var(object):
+11→    AUTH_USERS = '' # Add id of users you want to authorize to use the bot. Separated by spaces
+12→    MULTI_CLIENT = False
     API_ID = int(getenv('API_ID', '28737888'))
     API_HASH = str(getenv('API_HASH', 'aa9fc525a5e5a837256c1f0b445af447'))
-    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7001727517:AAHirrJg2tVsbQZLuAF_fitd0dv6ItM5vmY'))
+    BOT_TOKEN = str(getenv('BOT_TOKEN' , '7386512270:AAHMk189NkdiTRKnFIDGnG8Fp13sUfqKuAs'))
     name = str(getenv('name', 'bisal_file2link_bot'))
     SLEEP_THRESHOLD = int(getenv('SLEEP_THRESHOLD', '60'))
     WORKERS = int(getenv('WORKERS', '8'))
@@ -42,6 +42,6 @@ class Var(object):
         "plan2": 50,
         "plan3": 100
     }
-    DEFAULT_PLAN = "default"
-    
-    MULTI_TOKENS = getenv('MULTI_TOKENS', '7656364400:AAEGoVoUCXvjoQcAO2GyzwpcTVlXkWoE6Z8 8048965809:AAEQZOja-aNNHiINBihVsehvIIo1DEnDELM 7576471028:AAH91c5MjKLIqiWB4DN79v0VoBYRMI29oqw 8006698778:AAELDwINICfcuRJPGJQiUR-1Qf6uZrCqH2A 7937350226:AAHbnksthkjIcwcskz5IKfVBu12lgVXLuvg 7670657219:AAEC48szzPAFmUEljo3PXaEzuU52LHyEjQo 7681049237:AAEHBMC6x_yfkVxD5TTKmk3Hp7NXWtVqO7w 8105409082:AAEZeoSHga_OTI6BYCt5SAyVzqv5VLdqYYo 7728245130:AAEZQ0-jv0HMyNg6zMCiRqY_b-ltAtBXsE4')
+45→    DEFAULT_PLAN = "default"
+46→    
+47→    MULTI_TOKENS = getenv('MULTI_TOKENS', '')
