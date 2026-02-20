@@ -43,6 +43,7 @@ CANCELLABLE_STATES = {
 
 AVAILABLE_TOOLS = {
     "vt": "Video + Video Merge (-vt)",
+    "va": "Video + Audio Merge (-va)",
 }
 DEFAULT_TOOL = "vt"
 
@@ -60,6 +61,7 @@ class LeechTask:
     output_name: str                             # -m value (with .mp4 guaranteed)
     suggested_tool: str = DEFAULT_TOOL           # from command flags
     selected_tool: Optional[str] = None          # confirmed by user
+    audio_mode: Optional[int] = None              # 1=remove original, 2=keep original
     status: TaskStatus = TaskStatus.COMMAND_RECEIVED
 
     # File tracking
