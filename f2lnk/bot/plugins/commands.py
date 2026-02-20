@@ -92,60 +92,77 @@ async def help_cd(b, m):
             Var.NEW_USER_LOG,
             f"**Nᴇᴡ Usᴇʀ Jᴏɪɴᴇᴅ:** \n\n__Mʏ Nᴇᴡ Fʀɪᴇɴᴅ__ [{m.from_user.first_name}](tg://user?id={m.from_user.id}) __Sᴛᴀʀᴛᴇᴅ Yᴏᴜʀ Bᴏᴛ !!__"
         )
-    if Var.UPDATES_CHANNEL != "None":
-        try:
-            user = await b.get_chat_member(Var.UPDATES_CHANNEL, m.chat.id)
-            if user.status == "kicked":
-                await b.send_message(
-                    chat_id=m.chat.id,
-                    text="__𝓢𝓞𝓡𝓡𝓨, 𝓨𝓞𝓤 𝓐𝓡𝓔 𝓐𝓡𝓔 𝓑𝓐𝓝𝓝𝓔𝓓 𝓕𝓡𝓞𝓜 𝓤𝓢𝓘𝓝𝓖 𝓜𝓔. 𝓒ᴏɴᴛᴀᴄᴛ ᴛʜᴇ 𝓓ᴇᴠᴇʟᴏᴘᴇʀ__\n\n  **𝙃𝙚 𝙬𝙞𝙡𝙡 𝙝𝙚𝙡𝙥 𝙮𝙤𝙪**",
-                    disable_web_page_preview=True
-                )
-                return
-        except UserNotParticipant:
-             await StreamBot.send_photo(
-                chat_id=m.chat.id,
-                photo="https://telegra.ph/file/5eb253f28ed7ed68cb4e6.png",
-                caption=""""<b>Hᴇʏ ᴛʜᴇʀᴇ!\n\nPʟᴇᴀsᴇ ᴊᴏɪɴ ᴏᴜʀ ᴜᴘᴅᴀᴛᴇs ᴄʜᴀɴɴᴇʟ ᴛᴏ ᴜsᴇ ᴍᴇ ! 😊\n\nDᴜᴇ ᴛᴏ sᴇʀᴠᴇʀ ᴏᴠᴇʀʟᴏᴀᴅ, ᴏɴʟʏ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ sᴜʙsᴄʀɪʙᴇʀs ᴄᴀɴ ᴜsᴇ ᴛʜɪs ʙᴏᴛ !</b>""",
-                reply_markup=InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton("Jᴏɪɴ ɴᴏᴡ 🚩", url=f"https://t.me/{Var.UPDATES_CHANNEL}")
-                        ]
-                    ]
-                ),
 
-            )
-             return
-        except Exception:
-            await b.send_message(
-                chat_id=m.chat.id,
-                text="<b>sᴏᴍᴇᴛʜɪɴɢ ᴡᴇɴᴛ ᴡʀᴏɴɢ.ᴘʟᴇᴀsᴇ <a href='https://t.me/biisal_bot'>ᴄʟɪᴄᴋ ʜᴇʀᴇ ғᴏʀ sᴜᴘᴘᴏʀᴛ</a></b>",
+    help_text = (
+        "📖 **Bot Help — Complete Guide**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-                disable_web_page_preview=True)
-            return
-    await StreamBot.send_photo(
-    chat_id=m.chat.id,
-    photo="https://telegra.ph/file/d813fe75a3ac675ef34b7.jpg",
-    caption=f"<b>ᴡᴇ ᴅᴏɴᴛ ɴᴇᴇᴅ ᴍᴀɴʏ <a href='https://t.me/bisal_files'>ᴄᴏᴍᴍᴀɴᴅs</a> ᴛᴏ ᴜsᴇ ᴛʜɪs ʙᴏᴛ 🤩.\n\nᴊᴜsᴛ sᴇɴᴅ ᴍᴇ <a href='https://t.me/bisal_files'>ᴠɪᴅᴇᴏ ғɪʟᴇs</a> ᴀɴᴅ ɪ ᴡɪʟʟ ɢɪᴠᴇ ʏᴏᴜ <a href='https://t.me/bisal_files'>ᴅɪʀᴇᴄᴛ ᴅᴏᴡɴʟᴏᴀᴅ & sᴛʀᴇᴀᴍᴀʙʟᴇ</a> ʟɪɴᴋ.\n\nᴏʀ ʏᴏᴜ ᴄᴀɴ ᴜsᴇ ᴍᴇ ɪɴ <a href='https://t.me/bisal_files'>ʏᴏᴜʀ ᴄʜᴀɴɴᴇʟ</a>..ᴊᴜsᴛ ᴀᴅᴅ ᴍᴇ ᴀɴᴅ ᴍᴀᴋᴇ ᴍᴇ ᴀᴅᴍɪɴ ᴀɴᴅ sᴇᴇ ᴍʏ ᴍᴀɢɪᴄ 😎</b>",
-    reply_markup=InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("ᴜᴘᴅᴀᴛᴇ ᴄʜᴀɴɴᴇʟ 🤡", url=bisal_channel)
-            ],
-            [
-                InlineKeyboardButton("ᴅɪsᴄʟᴀɪᴍᴇʀ 🔻", url=f"https://www.google.com"),
-                InlineKeyboardButton("ᴏᴜʀ ɢʀᴏᴜᴘ 🚩", url=bisal_grp),
+        "**📁 File to Link (Auto)**\n"
+        "Send any file → get **Stream** & **Download** links\n"
+        "Works in **Private**, **Groups**, and **Channels**\n\n"
 
-            ],
-            [
-                InlineKeyboardButton("ʜᴏᴍᴇ", callback_data="start"),
+        "**🐦 Twitter/X Downloader (Auto)**\n"
+        "Paste any Twitter/X link → auto download\n"
+        "Supports videos, GIFs, and images\n\n"
 
-            ]
+        "**🔗 URL Uploader (Auto)**\n"
+        "Send any direct URL → bot downloads & uploads\n"
+        "Max size: 1.95 GB\n\n"
 
-        ]
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "**📌 Commands:**\n\n"
+
+        "**🎬 `/vt` — Video Tools Menu**\n"
+        "Reply to a file → interactive menu with 10 tools:\n"
+        "Merge V+V, V+A, V+Sub, Hardsub, SubSync,\n"
+        "Compress, Trim, Watermark, Extract Audio/Video\n\n"
+
+        "**⚙️ `/l` — Batch Media Processing**\n"
+        "Reply to first file:\n"
+        "`/l -i <count> -m <output> -<tool>`\n\n"
+        "**Flags:** `-i` files, `-m` output name\n"
+        "`-start HH:MM:SS` `-end HH:MM:SS` (trim/cut)\n\n"
+        "**10 Tools:**\n"
+        "`-vt` Video+Video  `-va` Video+Audio\n"
+        "`-aa` Audio+Audio  `-vs` Video+Subtitle\n"
+        "`-cv` Compress     `-wv` Watermark\n"
+        "`-tv` Trim         `-cut` Cut\n"
+        "`-rv` Extract Audio `-ev` Extract Video\n\n"
+
+        "**📋 `/mediainfo`** — Get file metadata\n"
+        "Reply to file or send URL\n\n"
+
+        "**📦 `/zip`** — Compress files into ZIP\n"
+        "**📂 `/unzip`** — Extract ZIP/RAR/7z\n\n"
+
+        "**🔗 `/jl <URL>`** — JL Downloader\n"
+        "Download from supported sites\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "**👤 User Commands:**\n"
+        "`/myplan` — Check your plan & usage\n"
+        "`/add_footer <text>` — Set custom footer\n"
+        "`/remove_footer` — Remove footer\n"
+        "`/cancel <task_id>` — Cancel running task\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "**📝 Examples:**\n"
+        "`/l -i 2 -m merged.mp4 -vt`\n"
+        "`/l -i 1 -m trimmed.mp4 -tv -start 00:01:00 -end 00:02:30`\n"
+        "`/l -i 3 -m audio -rv`\n"
+        "`/mediainfo https://example.com/video.mp4`\n\n"
+
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "**⚡ Features:**\n"
+        "• Stream & download links for any file\n"
+        "• Batch processing with parallel downloads\n"
+        "• Multi-audio extraction (all tracks)\n"
+        "• Quality preservation (uses `-c copy`)\n"
+        "• Cancel anytime\n"
+        "• Daily usage limits per plan\n"
     )
-)
+    await m.reply_text(help_text, quote=True)
+
 
 # --- NEW COMMAND: /myplan ---
 @StreamBot.on_message(filters.command("myplan") & filters.private)
@@ -373,3 +390,4 @@ async def cb_handler(client, query):
         user_id =(data.split("_")[1])
         user_id = int(user_id.replace(' ' , ''))
         await query.message.edit(f"Tʜᴇ ᴜɴʙᴀɴ ᴏɴ <code>{user_id}</code> ᴡᴀs ᴇxᴇᴄᴜᴛᴇᴅ sɪʟᴇɴᴛʟʏ.")
+            
