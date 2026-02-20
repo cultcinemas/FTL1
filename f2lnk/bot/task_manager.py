@@ -129,6 +129,9 @@ class LeechTask:
         self.work_dir = os.path.join(TASKS_ROOT, self.task_id)
         os.makedirs(self.work_dir, exist_ok=True)
         self.cancel_event = asyncio.Event()
+        # Pre-select the suggested tool so it's never None
+        if self.selected_tool is None:
+            self.selected_tool = self.suggested_tool
 
     @property
     def is_cancellable(self) -> bool:
