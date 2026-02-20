@@ -1,4 +1,4 @@
-# f2lnk/bot/task_manager.py
+#  f2lnk/bot/task_manager.py
 # Central task state management for the /leech workflow.
 
 import os
@@ -49,6 +49,10 @@ AVAILABLE_TOOLS = {
     "vs": "Video + Subtitle Merge (-vs)",
     "cv": "Compress Video (-cv)",
     "wv": "Watermark Video (-wv)",
+    "tv": "Trim Video (-tv)",
+    "cut": "Cut Video (-cut)",
+    "rv": "Remove Video Stream (-rv)",
+    "ev": "Extract Video Only (-ev)",
 }
 DEFAULT_TOOL = "vt"
 
@@ -106,6 +110,13 @@ class LeechTask:
     watermark_image_path: Optional[str] = None
     watermark_mode: Optional[int] = None          # 1-8
     watermark_position: Optional[str] = None      # tl/tr/bl/br/center
+
+    # ── TV / CUT tools ──
+    start_time: Optional[str] = None              # HH:MM:SS
+    end_time: Optional[str] = None                # HH:MM:SS
+
+    # ── RV tool ──
+    audio_format: Optional[str] = None            # mp3/aac/wav/copy
 
     # ── Internal ──
     work_dir: str = ""
