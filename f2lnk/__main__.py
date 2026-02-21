@@ -80,6 +80,13 @@ async def start_services():
     except Exception as e:
         print(f'got this err to send restart msg to owner : {e}')
     print('Bot ready to use ✅')
+    # Start the auto-restart watchdog
+    try:
+        from f2lnk.bot.plugins.restart import start_watchdog
+        start_watchdog()
+        print('Restart watchdog started ✅')
+    except Exception as e:
+        print(f'Watchdog failed to start: {e}')
     await idle()
 
 if __name__ == '__main__':
@@ -87,3 +94,4 @@ if __name__ == '__main__':
         loop.run_until_complete(start_services())
     except KeyboardInterrupt:
         logging.info('----------------------- Service Stopped -----------------------')
+     
