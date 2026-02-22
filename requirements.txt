@@ -18,3 +18,4 @@ pymediainfo
 ffsubsync
 qbittorrent-api
 beautifulsoup4
+yt-dlp
