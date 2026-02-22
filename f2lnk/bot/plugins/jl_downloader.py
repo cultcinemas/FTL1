@@ -26,87 +26,169 @@ db = Database(Var.DATABASE_URL, Var.name)
 DOWNLOAD_ROOT = "./jl_downloads"
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
+_YTDLP_BASE = [
+    "yt-dlp",
+    "--no-warnings",
+    "--no-playlist",
+    "--no-check-certificates",
+    "--prefer-insecure",
+    "--geo-bypass",
+    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+]
+
 
 async def _ytdlp_info(url: str) -> dict:
-    """Get media info from yt-dlp without downloading."""
-    cmd = [
-        "yt-dlp", "--no-download", "--print-json",
-        "--no-warnings", "--no-playlist",
-        "-f", "best",
-        url,
-    ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        err = stderr.decode("utf-8", errors="replace").strip()
-        raise Exception(f"yt-dlp info failed: {err.splitlines()[-1] if err else 'Unknown error'}")
-
+    """Get media info from yt-dlp without downloading. Tries multiple strategies."""
     import json
-    return json.loads(stdout.decode("utf-8", errors="replace"))
 
-
-async def _ytdlp_download(url: str, output_path: str, status_msg: Message) -> str:
-    """Download media using yt-dlp with progress updates."""
-    output_template = os.path.join(output_path, "%(title).100s.%(ext)s")
-    cmd = [
-        "yt-dlp",
-        "--no-warnings", "--no-playlist",
-        "-f", "best[filesize<1.95G]/best",
-        "--merge-output-format", "mp4",
-        "-o", output_template,
-        "--newline",  # for progress parsing
-        url,
+    # Try strategies in order
+    strategies = [
+        _YTDLP_BASE + ["--no-download", "--print-json", url],
+        _YTDLP_BASE + ["--no-download", "--print-json", "--allow-unplayable-formats", url],
+        _YTDLP_BASE + ["--no-download", "--print-json", "--force-generic-extractor", url],
     ]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
 
-    last_update = time.time()
-    while True:
-        line = await proc.stdout.readline()
-        if not line:
-            break
-        text = line.decode("utf-8", errors="replace").strip()
+    last_err = ""
+    for cmd in strategies:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0 and stdout.strip():
+            return json.loads(stdout.decode("utf-8", errors="replace"))
+        last_err = stderr.decode("utf-8", errors="replace").strip()
 
-        # Parse progress: [download]  45.2% of 120.50MiB at 5.21MiB/s ETA 00:13
-        if "[download]" in text and "%" in text:
-            now = time.time()
-            if now - last_update > 3:
-                try:
-                    await status_msg.edit_text(f"⬇️ **Downloading...**\n`{text}`")
-                except (MessageNotModified, Exception):
-                    pass
-                last_update = now
+    raise Exception(f"yt-dlp info failed: {last_err.splitlines()[-1] if last_err else 'Unknown error'}")
 
-        # Merge progress
-        if "[Merger]" in text or "[ffmpeg]" in text:
-            now = time.time()
-            if now - last_update > 3:
-                try:
-                    await status_msg.edit_text("🔄 **Merging audio & video...**")
-                except (MessageNotModified, Exception):
-                    pass
-                last_update = now
 
-    await proc.wait()
-    if proc.returncode != 0:
-        stderr = await proc.stderr.read()
-        err = stderr.decode("utf-8", errors="replace").strip()
-        raise Exception(f"Download failed: {err.splitlines()[-1] if err else 'Unknown error'}")
+async def _ytdlp_download(url: str, output_path: str, status_msg: Message) -> list:
+    """Download media using yt-dlp with multiple fallback strategies."""
+    output_template = os.path.join(output_path, "%(title).100s.%(ext)s")
 
-    # Find downloaded file(s)
-    files = []
-    for f in os.listdir(output_path):
-        fp = os.path.join(output_path, f)
-        if os.path.isfile(fp) and os.path.getsize(fp) > 0:
-            files.append(fp)
-    return files
+    # Try multiple format strategies
+    format_strategies = [
+        ["--merge-output-format", "mp4", "-f", "bv*+ba/b/best"],
+        ["--merge-output-format", "mp4", "-f", "best/bestvideo+bestaudio"],
+        ["-f", "best", "--allow-unplayable-formats"],
+        ["--force-generic-extractor", "-f", "best"],
+    ]
+
+    last_err = ""
+    for fmt_args in format_strategies:
+        cmd = _YTDLP_BASE + fmt_args + [
+            "-o", output_template,
+            "--newline",
+            url,
+        ]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        last_update = time.time()
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").strip()
+
+            if "[download]" in text and "%" in text:
+                now = time.time()
+                if now - last_update > 3:
+                    try:
+                        await status_msg.edit_text(f"⬇️ **Downloading...**\n`{text}`")
+                    except Exception:
+                        pass
+                    last_update = now
+
+            if "[Merger]" in text or "[ffmpeg]" in text:
+                now = time.time()
+                if now - last_update > 3:
+                    try:
+                        await status_msg.edit_text("🔄 **Merging audio & video...**")
+                    except Exception:
+                        pass
+                    last_update = now
+
+        await proc.wait()
+
+        # Check if files were downloaded
+        files = []
+        for f in os.listdir(output_path):
+            fp = os.path.join(output_path, f)
+            if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+                files.append(fp)
+
+        if files:
+            return files
+
+        stderr_data = await proc.stderr.read()
+        last_err = stderr_data.decode("utf-8", errors="replace").strip()
+        logger.warning("yt-dlp strategy failed: %s", last_err.splitlines()[-1] if last_err else "unknown")
+
+    # Final fallback: direct download via aiohttp
+    logger.info("All yt-dlp strategies failed, trying direct aiohttp download...")
+    try:
+        await status_msg.edit_text("⬇️ **Trying direct download...**")
+        return await _direct_download(url, output_path, status_msg)
+    except Exception as e:
+        raise Exception(f"All download methods failed. Last yt-dlp error: {last_err.splitlines()[-1] if last_err else str(e)}")
+
+
+async def _direct_download(url: str, output_path: str, status_msg: Message) -> list:
+    """Fallback: download file directly via aiohttp for sites yt-dlp can't handle."""
+    import aiohttp
+    from urllib.parse import urlparse, unquote
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": url,
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=600), allow_redirects=True) as resp:
+            if resp.status not in (200, 206):
+                raise Exception(f"HTTP {resp.status}")
+
+            # Determine filename
+            fname = "download"
+            if "Content-Disposition" in resp.headers:
+                import re as _re
+                cd = resp.headers["Content-Disposition"]
+                match = _re.findall(r'filename[^;=\n]*=[\'"]?([^\'";\n]+)', cd)
+                if match:
+                    fname = match[0].strip()
+            if fname == "download":
+                path = urlparse(str(resp.url)).path
+                fname = unquote(os.path.basename(path)) or "download"
+
+            total = int(resp.headers.get("Content-Length", 0))
+            fpath = os.path.join(output_path, fname)
+            downloaded = 0
+            last_update = time.time()
+
+            with open(fpath, "wb") as f:
+                async for chunk in resp.content.iter_chunked(1024 * 1024):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.time()
+                    if now - last_update > 3:
+                        progress = f"⬇️ **Direct download...**\n`{humanbytes(downloaded)}`"
+                        if total:
+                            progress += f" / `{humanbytes(total)}`"
+                        try:
+                            await status_msg.edit_text(progress)
+                        except Exception:
+                            pass
+                        last_update = now
+
+    if os.path.exists(fpath) and os.path.getsize(fpath) > 0:
+        return [fpath]
+    raise Exception("Direct download produced empty file")
 
 
 async def process_jl_task(client: Client, message: Message, page_url: str):
