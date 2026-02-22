@@ -6,7 +6,7 @@ import sys
 import time
 import asyncio
 import logging
-import psutil
+import shutil
 
 from pyrogram import filters, Client
 from pyrogram.types import Message
@@ -19,10 +19,9 @@ logger = logging.getLogger(__name__)
 
 # ── Activity tracker ──
 _last_activity_time = time.time()
-_restart_lock = asyncio.Lock()
+_restart_in_progress = False
 
 # Config
-MAX_PARALLEL_TASKS = 10        # trigger restart warning above this
 CPU_THRESHOLD = 90.0           # percent
 RAM_THRESHOLD = 90.0           # percent
 IDLE_TIMEOUT = 86400           # 24 hours in seconds
@@ -35,124 +34,132 @@ def touch_activity():
     _last_activity_time = time.time()
 
 
-async def _graceful_restart(client: Client, reason: str, notify_chat: int = None):
-    """Gracefully stop tasks and restart the bot process."""
-    async with _restart_lock:
-        logger.info("Restart triggered: %s", reason)
+async def _do_restart(client: Client, reason: str, chat_id: int = None):
+    """
+    Gracefully stop everything and exit.
+    start.sh restart loop will bring the bot back up.
+    """
+    global _restart_in_progress
+    if _restart_in_progress:
+        return
+    _restart_in_progress = True
 
-        # Notify
-        restart_msg = (
-            "🔄 **Bot is restarting...**\n"
-            f"📋 Reason: {reason}\n"
-            "Please wait a few seconds."
-        )
+    logger.info("RESTART triggered: %s", reason)
 
-        if notify_chat:
-            try:
-                await client.send_message(notify_chat, restart_msg)
-            except Exception:
-                pass
-
-        # Notify owner
+    # ── 1. Send ONE restart message ──
+    restart_text = (
+        "🔄 **Bot is restarting...**\n"
+        f"📋 Reason: {reason}\n"
+        "Please wait a few seconds."
+    )
+    if chat_id:
         try:
-            await client.send_message(
-                Var.OWNER_ID[0],
-                f"⚠️ **Bot Restart**\n"
-                f"📋 Reason: {reason}\n"
-                f"🕐 Time: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}"
-            )
+            await client.send_message(chat_id, restart_text)
+        except Exception:
+            pass
+    # Also notify owner (if different from triggering chat)
+    owner_id = Var.OWNER_ID[0] if Var.OWNER_ID else None
+    if owner_id and owner_id != chat_id:
+        try:
+            await client.send_message(owner_id, restart_text)
         except Exception:
             pass
 
-        # Cancel all active leech tasks
-        for task_id, task in list(ACTIVE_LEECH_TASKS.items()):
-            try:
-                task.cancel_event.set()
-                logger.info("Cancelled task %s for restart", task_id)
-            except Exception:
-                pass
-
-        # Wait briefly for tasks to stop
-        await asyncio.sleep(2)
-
-        # Log and restart
-        logger.info("Restarting bot process...")
-
+    # ── 2. Cancel all active leech tasks ──
+    for task_id, task in list(ACTIVE_LEECH_TASKS.items()):
         try:
-            await client.stop()
+            task.cancel_event.set()
+            logger.info("Cancelled task %s for restart", task_id)
         except Exception:
             pass
 
-        # Restart the process
-        os.execv(sys.executable, [sys.executable, "-m", "f2lnk"])
+    # ── 3. Wait briefly for tasks to wind down ──
+    await asyncio.sleep(3)
+
+    # ── 4. Clean temp files ──
+    for d in ["./downloads", "./leech_tasks", "./vt_temp", "./zip_temp", "./mediainfo_temp"]:
+        if os.path.isdir(d):
+            try:
+                shutil.rmtree(d, ignore_errors=True)
+                logger.info("Cleaned temp dir: %s", d)
+            except Exception:
+                pass
+
+    # ── 5. Exit process — start.sh loop will restart us ──
+    logger.info("Exiting process for restart...")
+    await asyncio.sleep(1)
+
+    # os._exit bypasses cleanup handlers that might hang
+    os._exit(0)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  /restart COMMAND (admin only)
+#  /restart COMMAND (owner only)
 # ═══════════════════════════════════════════════════════════════
 
 @StreamBot.on_message(filters.command("restart") & filters.private)
 async def restart_command(client: Client, m: Message):
-    """Restart the bot. Admin/Owner only."""
+    """Restart the bot. Owner only."""
     touch_activity()
 
     if m.from_user.id not in Var.OWNER_ID:
-        await m.reply_text("❌ **Only admins can restart the bot.**", quote=True)
+        await m.reply_text("❌ **Only bot owner can restart.**", quote=True)
         return
 
-    await m.reply_text(
-        "🔄 **Bot is restarting...**\n"
-        "Please wait a few seconds.",
-        quote=True,
-    )
-
-    await _graceful_restart(client, f"Manual restart by user {m.from_user.id}", m.chat.id)
+    await _do_restart(client, f"Manual restart by user {m.from_user.id}", m.chat.id)
 
 
 # ═══════════════════════════════════════════════════════════════
-#  AUTO-RESTART WATCHDOG
+#  AUTO-RESTART WATCHDOG (background task)
 # ═══════════════════════════════════════════════════════════════
 
 async def _watchdog_loop():
-    """Background loop that monitors health and inactivity."""
-    await asyncio.sleep(60)  # wait 1 min after startup before first check
+    """Background loop: monitors system health and inactivity."""
+    # Wait 2 minutes after startup before first check
+    await asyncio.sleep(120)
 
     while True:
         try:
             await asyncio.sleep(HEALTH_CHECK_INTERVAL)
 
+            if _restart_in_progress:
+                return
+
             active_count = len(ACTIVE_LEECH_TASKS)
 
-            # ── Check system health ──
+            # ── Check system health (CPU/RAM) ──
             try:
-                cpu = psutil.cpu_percent(interval=1)
+                import psutil
+                cpu = psutil.cpu_percent(interval=2)
                 ram = psutil.virtual_memory().percent
+            except ImportError:
+                cpu, ram = 0, 0
             except Exception:
                 cpu, ram = 0, 0
 
-            if cpu > CPU_THRESHOLD or ram > RAM_THRESHOLD:
-                if active_count == 0:
-                    logger.warning(
-                        "Health alert: CPU=%.1f%%, RAM=%.1f%%. No tasks running. Restarting...",
-                        cpu, ram,
-                    )
-                    await _graceful_restart(
-                        StreamBot,
-                        f"High resource usage (CPU: {cpu:.0f}%, RAM: {ram:.0f}%)",
-                    )
-                    return
-                else:
-                    logger.warning(
-                        "Health alert: CPU=%.1f%%, RAM=%.1f%%. %d tasks active, waiting...",
-                        cpu, ram, active_count,
-                    )
+            if (cpu > CPU_THRESHOLD or ram > RAM_THRESHOLD) and active_count == 0:
+                logger.warning(
+                    "Health: CPU=%.1f%%, RAM=%.1f%%. No tasks. Auto-restarting.",
+                    cpu, ram,
+                )
+                await _do_restart(
+                    StreamBot,
+                    f"High resource usage (CPU: {cpu:.0f}%, RAM: {ram:.0f}%)",
+                )
+                return
 
-            # ── Check inactivity ──
+            if cpu > CPU_THRESHOLD or ram > RAM_THRESHOLD:
+                logger.warning(
+                    "Health: CPU=%.1f%%, RAM=%.1f%%. %d tasks active, waiting for them to finish.",
+                    cpu, ram, active_count,
+                )
+
+            # ── Check inactivity (24h) ──
             idle_seconds = time.time() - _last_activity_time
             if idle_seconds > IDLE_TIMEOUT and active_count == 0:
                 hours = idle_seconds / 3600
-                logger.info("Idle for %.1f hours with no tasks. Restarting...", hours)
-                await _graceful_restart(
+                logger.info("Idle for %.1f hours. Auto-restarting.", hours)
+                await _do_restart(
                     StreamBot,
                     f"Inactivity restart ({hours:.1f}h idle)",
                 )
@@ -163,7 +170,11 @@ async def _watchdog_loop():
 
 
 def start_watchdog():
-    """Start the watchdog background task. Call from __main__.py."""
-    asyncio.get_event_loop().create_task(_watchdog_loop())
-    logger.info("Restart watchdog started (idle=%ds, health=%ds interval)",
-                IDLE_TIMEOUT, HEALTH_CHECK_INTERVAL)
+    """Start the watchdog background task. Called from __main__.py."""
+    loop = asyncio.get_event_loop()
+    loop.create_task(_watchdog_loop())
+    logger.info(
+        "Watchdog started: health check every %ds, idle timeout %ds",
+        HEALTH_CHECK_INTERVAL, IDLE_TIMEOUT,
+    )
+    
