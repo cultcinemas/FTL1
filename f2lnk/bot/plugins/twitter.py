@@ -20,10 +20,10 @@ from f2lnk.vars import Var
 from f2lnk.utils.database import Database
 from f2lnk.utils.human_readable import humanbytes
 from f2lnk.utils.file_properties import get_name, get_hash
+from f2lnk.utils.split_upload import upload_file_or_split
 from f2lnk.bot.plugins.stream import is_maintenance_mode
 
 db = Database(Var.DATABASE_URL, Var.name)
-MAX_FILE_SIZE = 1.95 * 1024 * 1024 * 1024
 TWITTER_URL_REGEX = r"(?:https?:\/\/)?(?:www\.)?(?:twitter|x)\.com\/\w+\/(?:status|web)\/(\d+)"
 
 class APIException(Exception):
@@ -92,9 +92,7 @@ async def _run_twitter_process(c: Client, m: Message):
                 await m.reply_text(f"⚠️ Failed to get size for **{new_filename}**: `{e}`. Skipping.", quote=True)
                 continue
             
-            if file_size > MAX_FILE_SIZE:
-                await m.reply_text(f"Skipping **{new_filename}**. File size (**{humanbytes(file_size)}**) is over the 1.95 GB limit.", quote=True)
-                continue
+            # No file size limit — auto-split if >1.95GB
 
             # Check User Tier Limits (Only for Users, skip for Channels or Owner)
             if m.from_user and m.from_user.id not in Var.OWNER_ID:
@@ -138,11 +136,12 @@ async def _run_twitter_process(c: Client, m: Message):
 
             await status_msg.edit(f"⬆️ Uploading **{new_filename}**...")
             
-            # --- MODIFIED: Upload images as documents to preserve quality ---
-            if media_type in ['video', 'gif']:
-                log_msg = await c.send_video(Var.BIN_CHANNEL, download_path, thumb=thumb_path, file_name=new_filename)
-            else: # Send images and other types as files
-                log_msg = await c.send_document(Var.BIN_CHANNEL, download_path, thumb=thumb_path, file_name=new_filename)
+            # --- Upload to BIN_CHANNEL (auto-split if >1.95GB) ---
+            log_msgs = await upload_file_or_split(
+                c, Var.BIN_CHANNEL, download_path,
+                caption="", file_name=new_filename,
+            )
+            log_msg = log_msgs[0] if log_msgs else None
 
             # Dump log info
             user_link = f"[{m.from_user.first_name}](tg://user?id={m.from_user.id})" if m.from_user else f"{m.chat.title} (Channel)"
@@ -271,3 +270,4 @@ async def twitter_task_handler(c: Client, m: Message):
                     ACTIVE_TWITTER_TASKS.pop(task_key, None)
             except ValueError:
                 pass
+    
