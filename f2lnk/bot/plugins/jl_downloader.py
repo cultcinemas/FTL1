@@ -1,294 +1,261 @@
+# f2lnk/bot/plugins/jl_downloader.py
+# /jl — Universal Media Downloader powered by yt-dlp
+# Supports 1000+ sites: YouTube, Instagram, Facebook, TikTok, Vimeo, etc.
+
 import os
 import re
 import time
 import shutil
-import aiohttp
 import asyncio
-import mimetypes
-import subprocess
-from urllib.parse import urlparse, unquote, urljoin
-from typing import Optional
-from bs4 import BeautifulSoup
+import logging
 
 from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.errors import MessageNotModified
 from pyromod.exceptions import ListenerTimeout
 
-# Assuming these are imported correctly from your project environment
 from f2lnk.bot import StreamBot
-from f2lnk.utils.database import Database
 from f2lnk.vars import Var
+from f2lnk.utils.database import Database
+from f2lnk.utils.human_readable import humanbytes
+from f2lnk.utils.split_upload import upload_file_or_split
 
-# Mock objects (If you are running outside your FTL environment, keep these. Otherwise, use your actual imports.)
-class Database:
-    def __init__(self, *args): pass
-    async def get_user_info(self, user_id): return {"footer": "Downloaded via StreamBot"}
-
-class Var:
-    DATABASE_URL = "sqlite://test.db"
-    name = "jl_downloader_bot"
-    
+logger = logging.getLogger(__name__)
 db = Database(Var.DATABASE_URL, Var.name)
-DOWNLOAD_ROOT = "downloads"
+
+DOWNLOAD_ROOT = "./jl_downloads"
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
-# ---------------------------
-# Helpers
-# ---------------------------
 
-def humanbytes(size: int) -> str:
-    if not size: return "0 B"
-    power = 1024
-    n = 0
-    Dic_powerN = {0: "B", 1: "KB", 2: "MB", 3: "GB", 4: "TB"}
-    while size > power:
-        size /= power
-        n += 1
-    return f"{size:.2f} {Dic_powerN[n]}"
-
-# ---------------------------
-# Intelligent URL Extractor
-# ---------------------------
-
-async def extract_media_url(page_url: str, headers: dict) -> Optional[str]:
-    """
-    Async function to extract media URL from a webpage by parsing HTML and falling back to regex.
-    """
-    try:
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(page_url, headers=headers, allow_redirects=True) as response:
-                if response.status != 200:
-                    print(f"[Extractor] HTTP {response.status} for {page_url}")
-                    return None
-                html = await response.text()
-
-        soup = BeautifulSoup(html, "html.parser")
-        video_tags = soup.find_all("video")
-        for tag in video_tags:
-            source_tag = tag.find("source")
-            if source_tag and source_tag.get("src"):
-                return source_tag["src"]
-            if tag.get("src"):
-                return tag["src"]
-
-        patterns = [
-            # FIX: Corrected SyntaxError: EOL while scanning string literal
-            r'source\s*:\s*["\']', 
-            r'"file"\s*:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
-            r'"src"\s:\s*"([^"]+.(?:mp4|m3u8|mkv)[^"])"',
-            r'https?://[^\s"\'<>]+.(?:mp4|mkv|webm|m3u8)[^\s"\'<>]'
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, html, re.I)
-            if match:
-                return match.group(match.lastindex or 0)
-
-        return None
-    except Exception as e:
-        print(f"[Extractor] An error occurred: {e}")
-        return None
-
-# --- Robust HLS Downloader with Headers (FIXED FOR SMOOTH PLAYBACK) ---
-
-async def download_hls_stream(stream_url: str, file_path: str, status_msg: Message, headers: dict):
-    """
-    Downloads HLS stream using ffmpeg, passing browser headers and RE-ENCODING for smooth playback.
-    
-    FIX: Re-encoding with libx264/aac instead of '-c copy' to fix timestamp and lagging-frame issues.
-    """
-    await status_msg.edit("⬇️ Downloading and Processing HLS stream...\n(This uses FFmpeg and may take some time as it's re-encoding for smooth playback.)")
-    
-    # Create a *copy* of headers and remove 'Range' if it exists, as it can break FFmpeg HLS
-    ffmpeg_headers = headers.copy()
-    ffmpeg_headers.pop("Range", None)
-    header_str = "".join([f"{key}: {value}\r\n" for key, value in ffmpeg_headers.items()])
-    
-    process = await asyncio.create_subprocess_exec(
-        'ffmpeg', 
-        '-y', 
-        '-headers', header_str, 
-        '-i', stream_url, 
-        '-c:v', 'libx264',    # Video codec: H.264 (Universally compatible)
-        '-c:a', 'aac',       # Audio codec: AAC (Standard for MP4)
-        '-b:a', '128k',      # Audio bitrate (Good default)
-        '-crf', '23',        # Quality setting (Good balance)
-        '-movflags', '+faststart', # Optimize for web streaming
-        file_path,
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+async def _ytdlp_info(url: str) -> dict:
+    """Get media info from yt-dlp without downloading."""
+    cmd = [
+        "yt-dlp", "--no-download", "--print-json",
+        "--no-warnings", "--no-playlist",
+        "-f", "best",
+        url,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
     )
-    
-    _, stderr = await process.communicate()
-    
-    if process.returncode != 0:
-        error_message = stderr.decode().strip()
-        raise Exception(f"FFmpeg failed: {error_message.splitlines()[-1]}")
-    
-    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-        raise Exception("FFmpeg finished, but the output file is missing or empty.")
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        err = stderr.decode("utf-8", errors="replace").strip()
+        raise Exception(f"yt-dlp info failed: {err.splitlines()[-1] if err else 'Unknown error'}")
 
-# ---------------------------
-# Core download + upload logic
-# ---------------------------
+    import json
+    return json.loads(stdout.decode("utf-8", errors="replace"))
 
-async def process_jl_task(client: Client, message: Message, page_url: str):
-    status_msg = None
-    temp_dir = os.path.join(DOWNLOAD_ROOT, f"{message.from_user.id}_{int(time.time())}")
-    os.makedirs(temp_dir, exist_ok=True)
-    thumb_path = None
-    file_path = None
 
-    # --- HTTP 400 FIX: Expanded browser headers ---
-    # This makes the request look much more like a real browser to avoid being blocked.
-    parsed_page_origin = urlparse(page_url)
-    browser_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Referer": page_url,
-        "Accept": "video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Origin": f"{parsed_page_origin.scheme}://{parsed_page_origin.netloc}",
-        "Range": "bytes=0-" # Request the start of the file
-    }
+async def _ytdlp_download(url: str, output_path: str, status_msg: Message) -> str:
+    """Download media using yt-dlp with progress updates."""
+    output_template = os.path.join(output_path, "%(title).100s.%(ext)s")
+    cmd = [
+        "yt-dlp",
+        "--no-warnings", "--no-playlist",
+        "-f", "best[filesize<1.95G]/best",
+        "--merge-output-format", "mp4",
+        "-o", output_template,
+        "--newline",  # for progress parsing
+        url,
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
 
-    try:
-        parsed_page_url = urlparse(page_url)
-        is_direct_link = os.path.splitext(parsed_page_url.path)[1].lower() in ['.mp4', '.mkv', '.m3u8']
+    last_update = time.time()
+    while True:
+        line = await proc.stdout.readline()
+        if not line:
+            break
+        text = line.decode("utf-8", errors="replace").strip()
 
-        if is_direct_link:
-            status_msg = await message.reply_text("🎥 Direct media link detected!", quote=True)
-            direct_url = page_url
-        else:
-            status_msg = await message.reply_text("🔍 Scraping website for video...", quote=True)
-            # Use a copy of headers for scraping, without 'Range'
-            scraping_headers = browser_headers.copy()
-            scraping_headers.pop("Range", None)
-            direct_url = await extract_media_url(page_url, scraping_headers)
-            if not direct_url:
-                await status_msg.edit("❌ Failed to find a downloadable video.")
-                return
-
-        direct_url = urljoin(page_url, direct_url)
-        await status_msg.edit(f"✅ Video found!\n{direct_url[:70]}...\n\n⏳ Checking details...")
-
-        total_size, is_hls = 0, '.m3u8' in direct_url
-
-        if not is_hls:
-            try:
-                # Use HEAD request headers (including Range) to check size
-                async with aiohttp.ClientSession() as s, s.head(direct_url, headers=browser_headers, timeout=20) as r:
-                    if r.status == 200 or r.status == 206: # 206 Partial Content is OK
-                        total_size = int(r.headers.get("Content-Length", 0))
-                        # If server replies with Content-Range, it's more accurate
-                        if "Content-Range" in r.headers:
-                            try:
-                                total_size = int(r.headers["Content-Range"].split("/")[-1])
-                            except:
-                                pass # Keep Content-Length
-            except Exception: pass
-
-        if total_size > 1.95 * 1024**3:
-            await status_msg.edit(f"❌ File too large: {humanbytes(total_size)}")
-            return
-
-        try:
-            default_filename = unquote(os.path.basename(urlparse(direct_url).path)) or "video.mp4"
-            if is_hls: default_filename = os.path.splitext(default_filename)[0] + ".mp4"
-            
-            ask_name = await message.chat.ask(f"📦 Size: {humanbytes(total_size) if total_size else 'Unknown'}\n\nSend filename or /skip to use default:\n{default_filename}", timeout=90)
-            custom_name = ask_name.text.strip() if ask_name.text and ask_name.text.lower() != "/skip" else None
-
-            ask_thumb = await message.chat.ask("📸 Send a thumbnail or /skip for none.", timeout=60)
-            if ask_thumb.photo:
-                thumb_path = await ask_thumb.download(os.path.join(temp_dir, "thumb.jpg"))
-        except ListenerTimeout:
-            await status_msg.edit("⌛ Timeout – aborting.")
-            return
-
-        filename = custom_name or default_filename
-        file_path = os.path.join(temp_dir, filename)
-
-        if is_hls:
-            # Calls the fixed HLS download function
-            await download_hls_stream(direct_url, file_path, status_msg, browser_headers)
-        else:
-            await status_msg.edit("⬇️ Starting download...")
-            
-            last_update = time.time()
-            async with aiohttp.ClientSession() as session:
-                # Use all browser_headers for the download
-                async with session.get(direct_url, headers=browser_headers, timeout=None) as resp:
-                    if resp.status not in [200, 206]: # Allow 200 (OK) and 206 (Partial Content)
-                        await status_msg.edit(f"❌ Download failed – HTTP {resp.status}")
-                        return
-
-                    downloaded = 0
-                    with open(file_path, "wb") as f:
-                        async for chunk in resp.content.iter_chunked(1024 * 1024): # 1MB Chunks
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            now = time.time()
-                            if now - last_update > 3:
-                                try:
-                                    progress = f"⬇️ Downloading...\n{humanbytes(downloaded)}"
-                                    if total_size: progress += f" / {humanbytes(total_size)}"
-                                    await status_msg.edit(progress)
-                                except MessageNotModified: pass
-                                last_update = now
-        
-        if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
-            raise Exception("Download completed, but the final file is missing or empty.")
-
-        await status_msg.edit("📤 Download complete! Uploading...")
-        
-        last_update = time.time()
-        
-        async def up_progress(cur, tot):
-            nonlocal last_update
+        # Parse progress: [download]  45.2% of 120.50MiB at 5.21MiB/s ETA 00:13
+        if "[download]" in text and "%" in text:
             now = time.time()
             if now - last_update > 3:
-                try: 
-                    await status_msg.edit(f"📤 Uploading... {humanbytes(cur)} / {humanbytes(tot)}")
-                except MessageNotModified: 
-                    pass
-                except Exception:
+                try:
+                    await status_msg.edit_text(f"⬇️ **Downloading...**\n`{text}`")
+                except (MessageNotModified, Exception):
                     pass
                 last_update = now
 
-        user_info = await db.get_user_info(message.from_user.id)
-        footer = user_info.get("footer", "")
-        caption = f"{filename}" + (f"\n\n{footer}" if footer else "")
-        
+        # Merge progress
+        if "[Merger]" in text or "[ffmpeg]" in text:
+            now = time.time()
+            if now - last_update > 3:
+                try:
+                    await status_msg.edit_text("🔄 **Merging audio & video...**")
+                except (MessageNotModified, Exception):
+                    pass
+                last_update = now
+
+    await proc.wait()
+    if proc.returncode != 0:
+        stderr = await proc.stderr.read()
+        err = stderr.decode("utf-8", errors="replace").strip()
+        raise Exception(f"Download failed: {err.splitlines()[-1] if err else 'Unknown error'}")
+
+    # Find downloaded file(s)
+    files = []
+    for f in os.listdir(output_path):
+        fp = os.path.join(output_path, f)
+        if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+            files.append(fp)
+    return files
+
+
+async def process_jl_task(client: Client, message: Message, page_url: str):
+    """Core download + upload logic."""
+    status_msg = None
+    temp_dir = os.path.join(DOWNLOAD_ROOT, f"{message.from_user.id}_{int(time.time())}")
+    os.makedirs(temp_dir, exist_ok=True)
+
+    try:
+        status_msg = await message.reply_text("🔍 **Checking URL...**", quote=True)
+
+        # Try yt-dlp info first
         try:
-            await client.send_video(
-                chat_id=message.chat.id,
-                video=file_path,
-                thumb=thumb_path,
-                caption=caption,
-                progress=up_progress,
-                supports_streaming=True
+            info = await _ytdlp_info(page_url)
+            title = info.get("title", "video")
+            ext = info.get("ext", "mp4")
+            duration = info.get("duration", 0)
+            filesize = info.get("filesize") or info.get("filesize_approx") or 0
+            uploader = info.get("uploader", "Unknown")
+            site = info.get("extractor", "Unknown")
+
+            dur_str = ""
+            if duration:
+                m, s = divmod(int(duration), 60)
+                h, m = divmod(m, 60)
+                dur_str = f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+            info_text = (
+                f"✅ **Media found!**\n\n"
+                f"📁 **Title:** `{title[:80]}`\n"
+                f"🌐 **Site:** {site}\n"
+                f"👤 **Uploader:** {uploader}\n"
             )
-            await status_msg.delete()
-        except Exception as upload_error:
-            await status_msg.edit(f"❌ Upload failed: {str(upload_error)}")
-            raise
+            if dur_str:
+                info_text += f"⏱ **Duration:** {dur_str}\n"
+            if filesize:
+                info_text += f"📦 **Size:** ~{humanbytes(filesize)}\n"
+
+            await status_msg.edit_text(info_text)
+
+        except Exception as e:
+            logger.warning("yt-dlp info failed for %s: %s", page_url, e)
+            title = "download"
+            ext = "mp4"
+            await status_msg.edit_text(
+                "⚠️ Could not get media info, but will try downloading anyway..."
+            )
+
+        # Ask for custom filename
+        try:
+            default_name = re.sub(r'[\\/*?:"<>|]', '', title)[:80] + f".{ext}"
+            ask_name = await message.chat.ask(
+                f"📝 Send filename or **/skip** for default:\n`{default_name}`",
+                timeout=60,
+            )
+            if ask_name.text and ask_name.text.strip().lower() != "/skip":
+                custom_name = ask_name.text.strip()
+            else:
+                custom_name = None
+        except ListenerTimeout:
+            custom_name = None
+
+        filename = custom_name or default_name
+
+        # Download
+        await status_msg.edit_text("⬇️ **Starting download...**")
+        downloaded_files = await _ytdlp_download(page_url, temp_dir, status_msg)
+
+        if not downloaded_files:
+            await status_msg.edit_text("❌ Download finished but no files found.")
+            return
+
+        # Rename if custom name
+        if custom_name and len(downloaded_files) == 1:
+            old_path = downloaded_files[0]
+            old_ext = os.path.splitext(old_path)[1]
+            if not os.path.splitext(custom_name)[1]:
+                custom_name += old_ext
+            new_path = os.path.join(temp_dir, custom_name)
+            os.rename(old_path, new_path)
+            downloaded_files = [new_path]
+            filename = custom_name
+
+        # Upload all files
+        total = len(downloaded_files)
+        for i, fp in enumerate(downloaded_files):
+            fname = os.path.basename(fp)
+            fsize = os.path.getsize(fp)
+
+            await status_msg.edit_text(
+                f"⬆️ **Uploading** {i + 1}/{total}: `{fname}`\n"
+                f"📦 Size: `{humanbytes(fsize)}`"
+            )
+
+            # Get footer
+            try:
+                user_info = await db.get_user_info(message.from_user.id)
+                footer = user_info.get("footer", "")
+            except Exception:
+                footer = ""
+
+            caption = f"**{fname}**"
+            if footer:
+                caption += f"\n\n{footer}"
+
+            try:
+                await upload_file_or_split(
+                    client, message.chat.id, fp,
+                    caption=caption, file_name=fname,
+                    reply_to=message.id,
+                )
+            except Exception as e:
+                await message.reply_text(f"❌ Upload failed for `{fname}`: `{e}`")
+
+        await status_msg.delete()
+        logger.info("JL task complete for user %s: %s", message.from_user.id, page_url)
 
     except Exception as e:
-        if status_msg: await status_msg.edit(f"❌ An error occurred: {e}")
-        import traceback; traceback.print_exc()
-        
+        logger.error("JL error: %s", e, exc_info=True)
+        if status_msg:
+            try:
+                await status_msg.edit_text(f"❌ Error: `{e}`")
+            except Exception:
+                pass
+
     finally:
         if os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-# ---------------------------
-# Command Handler
-# ---------------------------
 
 @StreamBot.on_message(filters.command(["jl_downloader", "jl"]) & filters.private)
 async def jl_handler(client: Client, m: Message):
+    # Track activity for watchdog
+    try:
+        from f2lnk.bot.plugins.restart import touch_activity
+        touch_activity()
+    except Exception:
+        pass
+
     if len(m.command) < 2 and not m.reply_to_message:
-        await m.reply_text("🎬 Website Video Downloader\n\nUsage: /jl <website_url>")
+        await m.reply_text(
+            "🎬 **Universal Media Downloader**\n\n"
+            "**Usage:** `/jl <URL>`\n\n"
+            "**Supported sites (1000+):**\n"
+            "YouTube, Instagram, Facebook, TikTok,\n"
+            "Twitter/X, Vimeo, Dailymotion, Reddit,\n"
+            "SoundCloud, Twitch, Bilibili, and many more!\n\n"
+            "Powered by yt-dlp 🚀",
+        )
         return
 
     url = m.command[1].strip() if len(m.command) > 1 else m.reply_to_message.text.strip()
@@ -297,4 +264,4 @@ async def jl_handler(client: Client, m: Message):
         return
 
     await process_jl_task(client, m, url)
-                            
+            
