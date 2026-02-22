@@ -1,7 +1,12 @@
 #!/bin/bash
-# start.sh — Restart loop for the bot
-# When the bot exits (e.g. /restart or crash), it auto-restarts after 5s
+# start.sh — Start qBittorrent daemon + bot restart loop
 
+# Start qBittorrent-nox in background on port 8090
+echo "━━━ Starting qBittorrent daemon... ━━━"
+qbittorrent-nox --daemon --webui-port=8090 2>/dev/null || echo "qBittorrent already running or not installed"
+sleep 2
+
+# Bot restart loop
 while true; do
     echo "━━━ Starting bot... ━━━"
     python3 -m f2lnk
