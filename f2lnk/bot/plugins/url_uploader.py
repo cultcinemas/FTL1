@@ -54,19 +54,15 @@ async def _start_upload_process(c: Client, m: Message):
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.head(url, timeout=10, allow_redirects=True) as resp:
-                    if resp.status == 200:
+                    if resp.status in (200, 206, 302, 301):
                         total_size = int(resp.headers.get('Content-Length', 0))
-                    else:
-                        await status_msg.edit(f"URL is invalid or inaccessible. **Status:** `{resp.status}`")
-                        return
+                    # If HEAD fails, try GET with range
+                    elif resp.status == 405 or resp.status == 403:
+                        total_size = 0  # Unknown size, proceed anyway
         except Exception as e:
-            await status_msg.edit(f"Failed to get file details from URL: `{e}`")
-            return
+            # HEAD failed — proceed with unknown size
+            total_size = 0
 
-        if total_size == 0:
-            await status_msg.edit("Could not determine file size from the URL. Cannot proceed.")
-            return
-            
         # No file size limit — auto-split if >1.95GB
 
         # --- User daily limit check ---
@@ -92,9 +88,10 @@ async def _start_upload_process(c: Client, m: Message):
         # --- Interactive Conversation ---
         try:
             default_filename = os.path.basename(urlparse(url).path) or f"Untitled_{int(time.time())}"
+            size_text = humanbytes(total_size) if total_size else "Unknown"
             ask_filename = await c.ask(
                 chat_id=m.chat.id,
-                text=f"**URL:** `{url}`\n**File Size:** `{humanbytes(total_size)}`\n\nPlease send the desired filename, including extension (e.g., `My Video.mp4`).\n\nSend /skip to use default:\n`{default_filename}`",
+                text=f"**URL:** `{url}`\n**File Size:** `{size_text}`\n\nPlease send the desired filename, including extension (e.g., `My Video.mp4`).\n\nSend /skip to use default:\n`{default_filename}`",
                 timeout=60
             )
             new_filename = None
