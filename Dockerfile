@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     p7zip-full \
     gcc \
     libc6-dev \
+    qbittorrent-nox \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
