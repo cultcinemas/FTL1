@@ -19,11 +19,9 @@ from f2lnk.vars import Var
 from f2lnk.utils.database import Database
 from f2lnk.utils.human_readable import humanbytes
 from f2lnk.utils.file_properties import get_name, get_hash
+from f2lnk.utils.split_upload import upload_file_or_split
 
 db = Database(Var.DATABASE_URL, Var.name)
-
-# Set the maximum file size to 1.95 GB to avoid Telegram API errors
-MAX_FILE_SIZE = 1.95 * 1024 * 1024 * 1024
 
 
 async def _start_upload_process(c: Client, m: Message):
@@ -69,13 +67,7 @@ async def _start_upload_process(c: Client, m: Message):
             await status_msg.edit("Could not determine file size from the URL. Cannot proceed.")
             return
             
-        # --- NEW: Size Limit Check ---
-        if total_size > MAX_FILE_SIZE:
-            await status_msg.edit(
-                f"File size ({humanbytes(total_size)}) is larger than the allowed limit of **1.95 GB**.\n\n"
-                "Please upload a file smaller than 1.95 GB to avoid issues with Telegram's limits."
-            )
-            return
+        # No file size limit — auto-split if >1.95GB
 
         # --- User daily limit check ---
         if m.from_user.id not in Var.OWNER_ID:
@@ -180,19 +172,12 @@ async def _start_upload_process(c: Client, m: Message):
                     pass
                 last_update_time = current_time
         
-        # --- Upload to BIN_CHANNEL ---
-        log_msg = None
-        media_type = mimetypes.guess_type(file_save_path)[0]
-        if media_type and media_type.startswith("video"):
-             log_msg = await c.send_video(
-                chat_id=Var.BIN_CHANNEL, video=file_save_path, thumb=thumb_path,
-                file_name=new_filename, progress=progress
-             )
-        else:
-             log_msg = await c.send_document(
-                chat_id=Var.BIN_CHANNEL, document=file_save_path, thumb=thumb_path,
-                file_name=new_filename, progress=progress
-             )
+        # --- Upload to BIN_CHANNEL (auto-split if >1.95GB) ---
+        log_msgs = await upload_file_or_split(
+            c, Var.BIN_CHANNEL, file_save_path,
+            caption="", file_name=new_filename, progress=progress,
+        )
+        log_msg = log_msgs[0] if log_msgs else None
         
         if not log_msg:
             await status_msg.edit("Failed to upload file to bin channel.")
@@ -293,3 +278,4 @@ async def universal_cancel_handler(c: Client, m: Message):
         await m.reply_text(f"✅ Successfully cancelled {cancelled_uploads} upload task(s) and {cancelled_twitter} Twitter task(s).", quote=True)
     else:
         await m.reply_text("You have no active processes to cancel.", quote=True)
+        
