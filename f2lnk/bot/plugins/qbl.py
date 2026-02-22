@@ -186,11 +186,8 @@ async def qbl_command(client: Client, m: Message):
             f"⬆️ Uploading to Telegram..."
         )
 
-        # Find downloaded files
-        content_path = t.content_path
-        if not content_path or not os.path.exists(content_path):
-            # Fallback: search save_path
-            content_path = save_path
+        # Find downloaded files using save_path + torrent name
+        content_path = os.path.join(save_path, torrent_name)
 
         files_to_upload = []
         if os.path.isfile(content_path):
@@ -200,6 +197,25 @@ async def qbl_command(client: Client, m: Message):
                 for f in sorted(files):
                     fp = os.path.join(root, f)
                     if os.path.getsize(fp) > 0:
+                        files_to_upload.append(fp)
+
+        # Fallback: use torrents_files API if nothing found
+        if not files_to_upload:
+            try:
+                torrent_files = qb.torrents_files(torrent_hash)
+                for tf in torrent_files:
+                    fp = os.path.join(save_path, tf.name)
+                    if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+                        files_to_upload.append(fp)
+            except Exception:
+                pass
+
+        # Final fallback: walk save_path
+        if not files_to_upload:
+            for root, dirs, files in os.walk(save_path):
+                for f in sorted(files):
+                    fp = os.path.join(root, f)
+                    if os.path.getsize(fp) > 0 and not f.endswith(".torrent"):
                         files_to_upload.append(fp)
 
         if not files_to_upload:
@@ -263,3 +279,4 @@ async def qbl_command(client: Client, m: Message):
                 shutil.rmtree(os.path.dirname(torrent_file_path), ignore_errors=True)
             except Exception:
                 pass
+            
