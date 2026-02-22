@@ -153,7 +153,12 @@ async def help_cd(b, m):
 
         "**🔗 /jl <URL>** — JL Downloader\n"
         "Download media from supported link sites.\n"
-        "Supports HLS streams and direct links.\n"
+        "Supports HLS streams and direct links.\n\n"
+
+        "**🧲 /qbl** — qBittorrent Leech\n"
+        "`/qbl <magnet_link>` or reply to `.torrent` file\n"
+        "Downloads torrent & uploads to Telegram.\n"
+        "Auto-splits files > 2GB.\n"
     )
     await m.reply_text(part1, quote=True)
 
@@ -452,4 +457,4 @@ async def cb_handler(client, query):
         user_id =(data.split("_")[1])
         user_id = int(user_id.replace(' ' , ''))
         await query.message.edit(f"Tʜᴇ ᴜɴʙᴀɴ ᴏɴ <code>{user_id}</code> ᴡᴀs ᴇxᴇᴄᴜᴛᴇᴅ sɪʟᴇɴᴛʟʏ.")
-            
+    
