@@ -59,32 +59,47 @@ async def qbl_command(client: Client, m: Message):
 
     magnet_link = None
     torrent_file_path = None
+    torrent_url = None
 
-    # Case 1: magnet link in command
+    # Gather input text from command args or replied message
+    input_text = ""
     if len(m.command) > 1:
-        magnet_link = " ".join(m.command[1:]).strip()
-        if not magnet_link.startswith("magnet:"):
-            await m.reply_text("❌ Invalid magnet link. Must start with `magnet:`", quote=True)
+        input_text = " ".join(m.command[1:]).strip()
+    elif m.reply_to_message:
+        # Reply to .torrent file
+        if m.reply_to_message.document:
+            doc = m.reply_to_message.document
+            if doc.file_name and doc.file_name.lower().endswith(".torrent"):
+                work_dir = os.path.join(DOWNLOAD_DIR, f"torrent_{user_id}_{int(time.time())}")
+                os.makedirs(work_dir, exist_ok=True)
+                torrent_file_path = await client.download_media(
+                    m.reply_to_message,
+                    file_name=os.path.join(work_dir, doc.file_name),
+                )
+            else:
+                await m.reply_text("❌ Please reply to a `.torrent` file.", quote=True)
+                return
+        # Reply to text message containing magnet/URL
+        elif m.reply_to_message.text:
+            input_text = m.reply_to_message.text.strip()
+
+    # Parse input_text (from command args or reply text)
+    if input_text and not torrent_file_path:
+        if input_text.startswith("magnet:"):
+            magnet_link = input_text
+        elif input_text.startswith(("http://", "https://")):
+            torrent_url = input_text
+        else:
+            await m.reply_text("❌ Invalid input. Send a `magnet:` link or a torrent URL.", quote=True)
             return
 
-    # Case 2: reply to .torrent file
-    elif m.reply_to_message and m.reply_to_message.document:
-        doc = m.reply_to_message.document
-        if doc.file_name and doc.file_name.endswith(".torrent"):
-            work_dir = os.path.join(DOWNLOAD_DIR, f"torrent_{user_id}_{int(time.time())}")
-            os.makedirs(work_dir, exist_ok=True)
-            torrent_file_path = await client.download_media(
-                m.reply_to_message,
-                file_name=os.path.join(work_dir, doc.file_name),
-            )
-        else:
-            await m.reply_text("❌ Please reply to a `.torrent` file.", quote=True)
-            return
-    else:
+    # Nothing provided
+    if not magnet_link and not torrent_file_path and not torrent_url:
         await m.reply_text(
             "**Usage:**\n"
             "`/qbl <magnet_link>`\n"
-            "Or reply to a `.torrent` file with `/qbl`",
+            "`/qbl <torrent_URL>`\n"
+            "Or reply to a `.torrent` file / magnet link with `/qbl`",
             quote=True,
         )
         return
@@ -93,6 +108,35 @@ async def qbl_command(client: Client, m: Message):
     _active_qbl[user_id] = True
 
     try:
+        # If torrent_url, download the .torrent file first
+        if torrent_url:
+            import aiohttp
+            work_dir = os.path.join(DOWNLOAD_DIR, f"torrent_{user_id}_{int(time.time())}")
+            os.makedirs(work_dir, exist_ok=True)
+            await status_msg.edit_text("📥 Downloading .torrent file...")
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(torrent_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                        if resp.status != 200:
+                            await status_msg.edit_text(f"❌ Failed to download torrent: HTTP {resp.status}")
+                            return
+                        # Determine filename
+                        fname = "download.torrent"
+                        if "Content-Disposition" in resp.headers:
+                            import re
+                            cd = resp.headers["Content-Disposition"]
+                            match = re.findall(r'filename[^;=\n]*=([\'"]?)(.+?)\1(;|$)', cd)
+                            if match:
+                                fname = match[0][1]
+                        if not fname.lower().endswith(".torrent"):
+                            fname += ".torrent"
+                        torrent_file_path = os.path.join(work_dir, fname)
+                        with open(torrent_file_path, "wb") as f:
+                            async for chunk in resp.content.iter_chunked(1024 * 1024):
+                                f.write(chunk)
+            except Exception as e:
+                await status_msg.edit_text(f"❌ Failed to download torrent file: `{e}`")
+                return
         # Connect to qBittorrent
         try:
             qb = _get_qb_client()
