@@ -45,4 +45,10 @@ class Var(object):
     DEFAULT_PLAN = "default"
 
     MULTI_TOKENS = getenv('MULTI_TOKENS', '')
+
+    # qBittorrent WebUI
+    QB_HOST = str(getenv('QB_HOST', 'localhost'))
+    QB_PORT = int(getenv('QB_PORT', '8090'))
+    QB_USER = str(getenv('QB_USER', 'admin'))
+    QB_PASS = str(getenv('QB_PASS', 'adminadmin'))
     
